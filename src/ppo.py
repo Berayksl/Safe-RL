@@ -9,6 +9,7 @@ from torch.distributions import MultivariateNormal, Normal
 import matplotlib.pyplot as plt
 from CBF import cbf_qp
 import CBF_v2
+import os
 
 class PPO:
 	"""
@@ -141,8 +142,13 @@ class PPO:
 
 			# Save our model if it's time
 			if i_so_far % self.save_freq == 0:
-				torch.save(self.actor.state_dict(), './models/ppo_actor.pth')
-				torch.save(self.critic.state_dict(), './models/ppo_critic.pth')
+				model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models')
+				os.makedirs(model_dir, exist_ok=True)
+				actor_path = os.path.join(model_dir, 'ppo_actor.pth')
+				critic_path = os.path.join(model_dir, 'ppo_critic.pth')
+
+				torch.save(self.actor.state_dict(), actor_path)
+				torch.save(self.critic.state_dict(), critic_path)
 
 		print("Finished training PPO")
 		print('Number of safety violations during training:', self.safety_violations)
@@ -150,9 +156,14 @@ class PPO:
 
 		print('Saving model...')
 		# Save our model at the end of training
-		torch.save(self.actor.state_dict(), './models/ppo_actor.pth')
-		torch.save(self.critic.state_dict(), './models/ppo_critic.pth')
-		
+		model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models')
+		os.makedirs(model_dir, exist_ok=True)
+		actor_path = os.path.join(model_dir, 'ppo_actor.pth')
+		critic_path = os.path.join(model_dir, 'ppo_critic.pth')
+
+
+		torch.save(self.actor.state_dict(), actor_path)
+		torch.save(self.critic.state_dict(), critic_path)
 		print('Model saved!')
 
 		#plot the average episodic returns
@@ -168,7 +179,10 @@ class PPO:
 			formatted_time = 'CBF_gaussian_' + formatted_time
 		else:
 			formatted_time = 'noCBF_gaussian_' + formatted_time
-		plt.savefig(f'./plots/{formatted_time}.png') #save the plot with the current date and time
+
+		plot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'plots')
+		plot_path = os.path.join(plot_dir, f'{formatted_time}.png')
+		plt.savefig(plot_path) #save the plot with the current date and time
 		print('Plot saved!')
 
 		plt.show()

@@ -44,7 +44,7 @@ def rollout(policy, ppo_model, action_range, env):
 	action_low = np.array([-action_range[0], -action_range[1]])
 	action_high = np.array([action_range[0], action_range[1]])
 	# Rollout until user kills process
-	for i in range(5): # number of test episodes
+	for i in range(10): # number of test episodes
 		obs = env.reset()
 		done = False
 

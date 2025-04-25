@@ -66,7 +66,7 @@ def train(env,ppo_model,hyperparameters, actor_model, critic_model):
 	# Train the PPO model with a specified total timesteps
 	# NOTE: You can change the total timesteps here, I put a big number just because
 	# you can kill the process whenever you feel like PPO is converging
-	model.learn(total_timesteps=100_000)
+	model.learn(total_timesteps=10_000)
 
 def test(env, ppo_model, action_range, actor_model):
 	"""
@@ -166,7 +166,7 @@ if __name__ == "__main__":
 		ppo_model = 'gaussian'
 		train(env=env, ppo_model= ppo_model, hyperparameters=hyperparameters, actor_model='', critic_model='')
 
-	else:
+	elif args.mode == 'test':
 		config['render'] = True #enable rendering for testing
 		config['dt_render'] = 0.1
 		env = Continuous2DEnv(config)
