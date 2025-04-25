@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 from CBF import cbf_qp
 import CBF_v2
 
-class PPO:
+class PPO_Beta:
 	"""
 		This is the PPO class we will use as our model in main.py
 	"""
-	def __init__(self, policy_class, env, **hyperparameters):
+	def __init__(self, actor_class, critic_class, env, **hyperparameters):
 		"""
 			Initializes the PPO model, including hyperparameters.
 
@@ -26,7 +26,6 @@ class PPO:
 			Returns:
 				None
 		"""
-
 		# Initialize hyperparameters for training with PPO
 		self._init_hyperparameters(hyperparameters)
 
@@ -36,8 +35,8 @@ class PPO:
 		self.act_dim = env.action_space.shape[0]
 
 		 # Initialize actor and critic networks
-		self.actor = policy_class(self.obs_dim, self.act_dim)                                                   # ALG STEP 1
-		self.critic = policy_class(self.obs_dim, 1)
+		self.actor = actor_class(self.obs_dim, self.act_dim)                                                   # ALG STEP 1
+		self.critic = critic_class(self.obs_dim, 1)
 
 		# Initialize optimizers for actor and critic
 		self.actor_optim = Adam(self.actor.parameters(), lr=self.lr)
@@ -141,8 +140,8 @@ class PPO:
 
 			# Save our model if it's time
 			if i_so_far % self.save_freq == 0:
-				torch.save(self.actor.state_dict(), './models/ppo_actor.pth')
-				torch.save(self.critic.state_dict(), './models/ppo_critic.pth')
+				torch.save(self.actor.state_dict(), './models/ppo_beta_actor.pth')
+				torch.save(self.critic.state_dict(), './models/ppo_beta_critic.pth')
 
 		print("Finished training PPO")
 		print('Number of safety violations during training:', self.safety_violations)
@@ -150,8 +149,8 @@ class PPO:
 
 		print('Saving model...')
 		# Save our model at the end of training
-		torch.save(self.actor.state_dict(), './models/ppo_actor.pth')
-		torch.save(self.critic.state_dict(), './models/ppo_critic.pth')
+		torch.save(self.actor.state_dict(), './models/ppo_beta_actor.pth')
+		torch.save(self.critic.state_dict(), './models/ppo_beta_critic.pth')
 		
 		print('Model saved!')
 
@@ -165,9 +164,9 @@ class PPO:
 		now = datetime.now()
 		formatted_time = now.strftime("%Y-%m-%d %H:%M:%S")
 		if self.CBF:
-			formatted_time = 'CBF_gaussian_' + formatted_time
+			formatted_time = 'CBF_beta_' + formatted_time
 		else:
-			formatted_time = 'noCBF_gaussian_' + formatted_time
+			formatted_time = 'noCBF_beta_' + formatted_time
 		plt.savefig(f'./plots/{formatted_time}.png') #save the plot with the current date and time
 		print('Plot saved!')
 
@@ -234,7 +233,9 @@ class PPO:
 				#check if the safety violated:
 				if safe_region_radius**2 - ((obs[0] - safe_region_center[0])**2 + (obs[1] - safe_region_center[1])**2) < 0:
 					safety_violated = True
-					#print(action)
+					print('Safety region violated!')
+					print('action:',action)
+					print('obs:', obs)
 
 				t += 1 # Increment timesteps ran this batch so far
 
@@ -251,8 +252,8 @@ class PPO:
 					clipped_action[0] = np.clip(action_RL[0], -self.action_range[0], self.action_range[0])
 					clipped_action[1] = np.clip(action_RL[1], -self.action_range[1], self.action_range[1])
 
-				# if action_RL != clipped_action:
-				# 	self.action_changed += 1 #increment the number of times the action is clipped
+				if action_RL[0] != clipped_action[0]:
+					print('action clipped!')
 
 				if self.CBF:
 					#action_CBF = cbf_qp(obs, action_RL, safe_region_center[0], safe_region_center[1], safe_region_radius, epsilon) #find the CBF action by solving QP
@@ -341,27 +342,76 @@ class PPO:
 				action - the action to take, as a numpy array
 				log_prob - the log probability of the selected action in the distribution
 		"""
+		alpha, beta = self.actor(obs) #get the alpha and beta parameters of the beta distribution
+
+		dist = torch.distributions.Beta(alpha, beta)
+
+		u = dist.rsample() #sample an action from the distribution
+
+		action_low = torch.tensor([-self.action_range[0], -self.action_range[1]], dtype=u.dtype, device=u.device)
+		action_high = torch.tensor([self.action_range[0], self.action_range[1]], dtype=u.dtype, device=u.device)
+
+		action = action_low + (action_high - action_low) * u
+
+
+		log_prob = dist.log_prob(u).sum(dim=-1) #calculate the log probability of the unscaled action
+		log_prob -= torch.log((action_high - action_low)).sum()
+
+		return action.detach().numpy(), log_prob.detach()
+	
+
+	def get_action_clipped(self, obs):
+		"""
+			modified version of get_action() that clips the action to the action range
+		"""
+
 		# Query the actor network for a mean action
 		mean = self.actor(obs)
 
 		# Create a distribution with the mean action and std from the covariance matrix above.
 		dist = MultivariateNormal(mean, self.cov_mat)
-		
 
 		# Sample an action from the distribution
-		action = dist.sample()
+		raw_action = dist.rsample()
 
-		# action[0] = torch.clamp(action[0], -5.0, 5.0)
-		# action[1] = torch.clamp(action[1], -1.0, 1.0)
+		# Apply tanh to squash the raw action to [-1, 1]
+		squashed_action = torch.tanh(raw_action)
+
+		action_range = torch.tensor(self.action_range, dtype=torch.float32) #convert to tensor
+
+		action = action_range * squashed_action #scale the action to the action range
 		
-		# Calculate the log probability for that action
-		log_prob = dist.log_prob(action)
+		# Compute the log probability of the raw action.
+		log_prob_raw = dist.log_prob(raw_action)
+		
+		# Correction for the tanh squashing:
+		# The derivative of tanh is 1 - tanh(x)^2.
+		# Because the transformation is applied element-wise, we sum the log of the absolute Jacobians.
+		# A small epsilon (like 1e-6) is added to avoid numerical instability.
+		log_prob_correction = torch.sum(torch.log(1 - squashed_action.pow(2) + 1e-6), dim=-1)
+		log_prob = log_prob_raw - log_prob_correction
 
 		# Return the sampled action and the log probability of that action in our distribution
 		return action.detach().numpy(), log_prob.detach()
 	
 
+	# def get_action_clipped_v2(self, obs):
+	# 	# Query the actor network for a mean action
+	# 	mean = self.actor(obs)
 
+	# 	# Create a distribution with the mean action and std from the covariance matrix above.
+	# 	dist = MultivariateNormal(mean, self.cov_mat)
+		
+	# 	# Sample an action from the distribution
+	# 	raw_action = dist.sample()
+
+	# 	clipped_action = torch.clamp(raw_action, -1.0, 1.0)
+
+	# 	# Calculate the log probability for that action
+	# 	log_prob = dist.log_prob(raw_action)
+
+	# 	# Return the sampled action and the log probability of that action in our distribution
+	# 	return raw_action.detach().numpy(), log_prob.detach()
 
 	def evaluate(self, batch_obs, batch_acts):
 		"""
@@ -384,12 +434,20 @@ class PPO:
 
 		# Calculate the log probabilities of batch actions using most recent actor network.
 		# This segment of code is similar to that in get_action()
-		mean = self.actor(batch_obs)
-		dist = MultivariateNormal(mean, self.cov_mat)
-		log_probs = dist.log_prob(batch_acts)
+		alpha, beta = self.actor(batch_obs)
+		dist = torch.distributions.Beta(alpha, beta)
+		
+		action_low = torch.tensor([-self.action_range[0], -self.action_range[1]], device=V.device)
+		action_high = torch.tensor([self.action_range[0], self.action_range[1]], device=V.device)
 
-		# Return the value vector V of each observation in the batch
-		# and log probabilities log_probs of each action in the batch
+		u = (batch_acts - action_low) / (action_high - action_low) #unscale the action
+
+		# 5. Compute log prob of transformed action
+		log_probs = dist.log_prob(u).sum(dim=-1)
+
+		# 6. Apply change-of-variables correction for scaling
+		log_probs -= torch.log(action_high - action_low).sum()
+
 		return V, log_probs
 
 	def _init_hyperparameters(self, hyperparameters):
@@ -405,8 +463,8 @@ class PPO:
 		"""
 		# Initialize default values for hyperparameters
 		# Algorithm hyperparameters
-		self.timesteps_per_batch = 500                 # Number of timesteps to run per batch
-		self.max_timesteps_per_episode = 100          # Max number of timesteps per episode
+		self.timesteps_per_batch = 500                  # Number of timesteps to run per batch
+		self.max_timesteps_per_episode = 100            # Max number of timesteps per episode
 		self.n_updates_per_iteration = 5                # Number of times to update actor/critic per iteration
 		self.lr = 0.005                                 # Learning rate of actor optimizer
 		self.gamma = 0.95                               # Discount factor to be applied when calculating Rewards-To-Go

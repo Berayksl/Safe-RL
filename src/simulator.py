@@ -15,6 +15,7 @@ class Continuous2DEnv:
         self.height = config.get("height", 10.0)
         self.dt = config.get("dt", 0.1)
         self.render = config.get("render", False)
+        self.dt_render = config.get("dt_render", 0.001)
         self.goal_location = np.array(config.get("goal_location", [8.0, 8.0]))
         self.goal_size = config.get("goal_size", 0.5)
         self.obstacle_location = np.array(config.get("obstacle_location", [4.0, 4.0]))
@@ -48,10 +49,22 @@ class Continuous2DEnv:
         if self.random_loc:
             x = np.random.uniform(0, self.width)
             y = np.random.uniform(0, self.height)
+            theta = self.init_loc[2] + np.random.uniform(-np.pi, np.pi)
+            # Ensure the agent starts within the safe region
+            while np.linalg.norm(np.array([x, y]) - self.safe_region_center) >= self.safe_region_radius:
+                x = np.random.uniform(0, self.width)
+                y = np.random.uniform(0, self.height)
+                theta = self.init_loc[2] + np.random.uniform(-np.pi, np.pi)
+                # Ensure the agent starts within the safe region
+                if np.linalg.norm(np.array([x, y]) - self.safe_region_center) < self.safe_region_radius:
+                    break
         else:
             x = self.init_loc[0]
             y = self.init_loc[1]
-        self.agent = UnicycleDynamics(x=x, y=y, dt=self.dt)
+            theta = self.init_loc[2]
+        self.agent = UnicycleDynamics(x=x, y=y, theta = theta, dt=self.dt)
+        # epsilon = 0.5
+        # self.agent = ModifiedUnicycleDynamics(x = x + epsilon*np.cos(theta), y = y + epsilon*np.sin(theta), theta = theta, epsilon=0.5)
         return np.array([self.agent.x, self.agent.y, self.agent.theta])
     
     def compute_reward(self):
@@ -86,13 +99,19 @@ class Continuous2DEnv:
         done = dist_to_goal <= self.goal_size
         
         if self.render:
-            plt.pause(0.01) #change later!!!
+            plt.pause(self.dt_render) #change later!!!
         
         return state, reward, done
     
     def update_animation(self, frame):
         x = np.array([self.agent.x])  # Convert scalar to NumPy array
         y = np.array([self.agent.y])  # Convert scalar to NumPy array
+
+        #revert the coordinates back to center coordinates:
+        # state = self.agent.get_robot_coordinates()
+        # x = np.array([state[0]]) 
+        # y = np.array([state[1]])
+
         self.agent_plot.set_data(x, y)
     
     def render_env(self):
@@ -108,29 +127,32 @@ if __name__ == "__main__":
 
     #config dictionary for the environment
     config = {
-        'init_loc': [0.0, 0.0], #initial location of the agent
+        'init_loc': [0.0, 0.0, 0.0], #initial location of the agent
         "width": 10.0,
         "height": 10.0,
         "dt": 0.1,
         "render": True,
+        'dt_render': 0.1,
         "goal_location": [8.0, 8.0],
         "goal_size": 0.5,
         "obstacle_location": [4.0, 4.0],
         "obstacle_size": 0.5,
         "safe_region_center": [0.0, 0.0],
         "safe_region_radius": 3.0,
-        "randomize_loc": False #whether to randomize the agent location at the end of each episode
+        "randomize_loc": True #whether to randomize the agent location at the end of each episode
     }
 
     env = Continuous2DEnv(config)
     state = env.reset()
 
-    action = (1.0, 1)  # Linear velocity = 1.0, Angular velocity = 0.1
+    action = (1.0, 1)  #linear vel., angular vel.
 
-    for _ in range(400):
+    for _ in range(100):
         state, reward, done = env.step(action)
 
-        print("State:", state)
+        #print("State:", state)
         if done:
             break
+
+        #state = env.reset()
 

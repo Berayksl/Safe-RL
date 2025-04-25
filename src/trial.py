@@ -4,14 +4,14 @@ from simulator import Continuous2DEnv, UnicycleDynamics, ModifiedUnicycleDynamic
 import matplotlib.pyplot as plt
 
 # Simulation parameters
-dt = 0.1  # Time step
-T = 10    # Total simulation time
+dt = 0.1  #time step
+T = 10    #total simulation time
 steps = int(T / dt)
 
 x0, y0, theta0 = 0.0, 0.0, 0.0
-v = 1.0    # Forward velocity
-w = 0.5    # Angular velocity
-epsilon = 0.5  # Reference point offset f
+v = 1.0    #forward velocity
+w = 0.5    #angular velocity
+epsilon = 0.5  #reference point offset f
 
 unicycle_trajectory = np.zeros((steps, 3))
 modified_trajectory = np.zeros((steps, 3))

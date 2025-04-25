@@ -17,8 +17,14 @@ def cbf_qp(state, a_rl, x_c, y_c, r, epsilon):
     a_theta = cp.Variable()
     u = np.array([av, a_theta]) #control matrix
     
+    #convert the reference point coordinates to robot coordinates:
+
+    # x_robot = x - epsilon * np.cos(theta)
+    # y_robot = y - epsilon * np.sin(theta)
+
+
     # Barrier function h(s) = r^2 - (x - x_c)^2 - (y - y_c)^2
-    h = r**2 - (x - x_c)**2 - (y - y_c)**2
+    h = r**2 - (x - x_c)**2 - (y - y_c)**2 - 0.9
     dh_dx = -2 * (x - x_c)
     dh_dy = -2 * (y - y_c)
     dh_dtheta = 0
@@ -34,7 +40,7 @@ def cbf_qp(state, a_rl, x_c, y_c, r, epsilon):
     g = np.array([[np.cos(theta), -epsilon*np.sin(theta)], [np.sin(theta), epsilon*np.cos(theta)], [0, 1]])
 
     # Constraint ensuring ḣ(s) >= -alpha * h(s) (CBF condition)
-    alpha = 10
+    alpha = 5
     #delta = cp.Variable(nonneg=True)  # slack variable
     #K = 100  # weight for the slack variable
 
@@ -46,11 +52,11 @@ def cbf_qp(state, a_rl, x_c, y_c, r, epsilon):
     ]
     
     # Quadratic objective: minimize deviation from desired control
-    objective = cp.Minimize(av**2 + a_theta**2)
+    objective = cp.Minimize((av-av_rl)**2 + (a_theta - a_theta_rl)**2)
     
     # Solve QP
     problem = cp.Problem(objective, constraint)
-    problem.solve()
+    problem.solve(solver=cp.ECOS)
 
     # print(f"Slack variable delta: {delta.value}")
     
@@ -69,11 +75,12 @@ if __name__ == '__main__':
 
     #config dictionary for the environment
     config = {
-        'init_loc': [0.0, 0.0], #initial location of the agent
+        'init_loc': [0.0, 0.0, 0.0], #initial location of the agent (x, y, theta)
         "width": 8.0,
         "height": 8.0,
         "dt": 0.1,
         "render": True,
+        'dt_render': 0.1,
         "goal_location": [10.0, 10.0],
         "goal_size": 0.5,
         "obstacle_location": [10.0, 10.0],
@@ -92,8 +99,8 @@ if __name__ == '__main__':
     action = action_rl
 
     for _ in range(400):
-        state, reward, done = env.step(action)
         action = cbf_qp(state, action_rl, safe_region_center[0], safe_region_center[1], safe_region_radius, epsilon)
+        state, reward, done = env.step(action)
         action = (action[0]+action_rl[0] , action[1] + action_rl[1]) #a_rl + a_cbf
 
         print('action:', action)

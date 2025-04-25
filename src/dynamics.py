@@ -2,7 +2,7 @@ import numpy as np
 
 
 class UnicycleDynamics:
-    def __init__(self, x=5.0, y=5.0, theta=0.0, v=1.0, w=0.5, dt=0.1):
+    def __init__(self, x=5.0, y=5.0, theta=0.0, v=0.0, w=0.0, dt=0.1):
         self.x = x
         self.y = y
         self.theta = theta
@@ -23,7 +23,7 @@ class UnicycleDynamics:
         return np.array([self.x, self.y, self.theta])
 
 class ModifiedUnicycleDynamics: #from the paper
-    def __init__(self, x=5.0, y=5.0, theta=0.0, v=1.0, w=0.5, dt=0.1, epsilon=0.5):
+    def __init__(self, x=5.0, y=5.0, theta=0.0, v=0.0, w=0.0, dt=0.1, epsilon=0.5):
         self.x = x
         self.y = y
         self.theta = theta

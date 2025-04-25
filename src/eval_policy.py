@@ -1,9 +1,8 @@
+import numpy as np
+
 """
 	This file is used only to evaluate our trained policy/actor after
-	training in main.py with ppo.py. I wrote this file to demonstrate
-	that our trained policy exists independently of our learning algorithm,
-	which resides in ppo.py. Thus, we can test our trained policy without 
-	relying on ppo.py.
+	training in main.py with ppo.py.
 """
 
 def _log_summary(ep_len, ep_ret, ep_num):
@@ -28,7 +27,7 @@ def _log_summary(ep_len, ep_ret, ep_num):
 		print(f"------------------------------------------------------", flush=True)
 		print(flush=True)
 
-def rollout(policy, env):
+def rollout(policy, ppo_model, action_range, env):
 	"""
 		Returns a generator to roll out each episode given a trained policy and
 		environment to test on. 
@@ -42,6 +41,8 @@ def rollout(policy, env):
 			A generator object rollout, or iterable, which will return the latest
 			episodic length and return on each iteration of the generator.
 	"""
+	action_low = np.array([-action_range[0], -action_range[1]])
+	action_high = np.array([action_range[0], action_range[1]])
 	# Rollout until user kills process
 	for i in range(5): # number of test episodes
 		obs = env.reset()
@@ -58,7 +59,20 @@ def rollout(policy, env):
 			t += 1
 
 			# Query deterministic action from policy and run it
-			action = policy(obs).detach().numpy()
+			if ppo_model == 'gaussian':
+				action = policy(obs).detach().numpy()
+				#action = action_low + (action_high - action_low) * action
+
+			elif ppo_model == 'beta':
+				# For beta policy, we need to sample from the beta distribution
+				alpha, beta = policy(obs)
+				alpha = alpha.detach().numpy()
+				beta = beta.detach().numpy()
+				# action = np.random.beta(alpha.detach().numpy(), beta.detach().numpy())
+				# action = action_low + (action_high - action_low) * action
+				action = alpha / (beta + alpha)
+				action = action_low + (action_high - action_low) * action
+
 			obs, rew, done = env.step(action)
 
 			# Sum all episodic rewards as we go along
@@ -70,7 +84,7 @@ def rollout(policy, env):
 		# returns episodic length and return in this iteration
 		yield ep_len, ep_ret
 
-def eval_policy(policy, env):
+def eval_policy(policy, ppo_model, action_range, env):
 	"""
 		The main function to evaluate our policy with. It will iterate a generator object
 		"rollout", which will simulate each episode and return the most recent episode's
@@ -88,5 +102,5 @@ def eval_policy(policy, env):
 		NOTE: To learn more about generators, look at rollout's function description
 	"""
 	# Rollout with the policy and environment, and log each episode's data
-	for ep_num, (ep_len, ep_ret) in enumerate(rollout(policy, env)):
+	for ep_num, (ep_len, ep_ret) in enumerate(rollout(policy, ppo_model, action_range, env)):
 		_log_summary(ep_len=ep_len, ep_ret=ep_ret, ep_num=ep_num)
