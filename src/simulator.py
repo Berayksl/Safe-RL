@@ -21,12 +21,16 @@ class Continuous2DEnv:
         self.obstacle_location = np.array(config.get("obstacle_location", [4.0, 4.0]))
         self.obstacle_size = config.get("obstacle_size", 0.5)
         self.random_loc = config.get("randomize_loc", True)
-        self.safe_region_center = np.array(config.get("safe_region_center", [5.0, 5.0]))
-        self.safe_region_radius = config.get("safe_region_radius", 3.0)
+        self.target_region_center = np.array(config.get("target_region_center", [0.0, 0.0]))
+        self.target_region_radius = config.get("target_region_radius", 0.0)
         self.init_loc = np.array(config.get("init_loc", [5.0, 5.0]))
+        self.action_max = config.get("action_max")
+        self.action_min = config.get("action_min")
 
         self.observation_space = np.zeros((3,))
         self.action_space = np.zeros((2,))
+
+
         
         self.reset()
         
@@ -37,8 +41,8 @@ class Continuous2DEnv:
             self.agent_plot, = self.ax.plot([], [], 'ro', label='Agent')
             self.goal_plot = plt.Circle(self.goal_location, self.goal_size, color='g', alpha=0.5, label='Goal')
             self.obstacle_plot = plt.Circle(self.obstacle_location, self.obstacle_size, color='r', alpha=0.5, label='Obstacle')
-            self.safe_region_plot = plt.Circle(self.safe_region_center, self.safe_region_radius, color='b', fill=False, linestyle='dashed', label='Safe Region')
-            self.ax.add_patch(self.safe_region_plot)
+            self.target_region_plot = plt.Circle(self.target_region_center, self.target_region_radius, color='b', fill=False, linestyle='-', label='Target Region')
+            self.ax.add_patch(self.target_region_plot)
             self.ax.add_patch(self.goal_plot)
             self.ax.add_patch(self.obstacle_plot)
             self.ax.legend()
@@ -77,15 +81,17 @@ class Continuous2DEnv:
         
         if dist_to_goal <= self.goal_size:
             reward += 100  # Reward for reaching the goal
+            #print("Goal Reached!")
 
         return reward 
     
-    def step(self, action):
+    def step(self, action, safe_region_radius = None):
         """
         Takes an action (linear and angular velocity) and updates the agent's position.
         :param action: A tuple (v, w) representing linear and angular velocity.
         :return: next_state, reward, done
         """
+        self.safe_region_radius = safe_region_radius
         state = self.agent.update(action)
         
         self.agent.x = np.clip(self.agent.x, -self.width, self.width)
@@ -104,15 +110,23 @@ class Continuous2DEnv:
         return state, reward, done
     
     def update_animation(self, frame):
+        if hasattr(self, 'safe_region_plot') and self.safe_region_plot in self.ax.patches:
+            self.safe_region_plot.remove()
+        
         x = np.array([self.agent.x])  # Convert scalar to NumPy array
         y = np.array([self.agent.y])  # Convert scalar to NumPy array
+
+        if self.safe_region_radius is not None:
+            self.safe_region_plot = plt.Circle(self.target_region_center, self.safe_region_radius, color='r', fill=False, linestyle='dashed', label='Safe Region')
+            self.ax.add_patch(self.safe_region_plot)
 
         #revert the coordinates back to center coordinates:
         # state = self.agent.get_robot_coordinates()
         # x = np.array([state[0]]) 
         # y = np.array([state[1]])
-
+        
         self.agent_plot.set_data(x, y)
+        self.ax.legend()
     
     def render_env(self):
         """Renders the environment continuously if enabled."""
@@ -123,8 +137,6 @@ class Continuous2DEnv:
 
 
 if __name__ == "__main__":
-
-
     #config dictionary for the environment
     config = {
         'init_loc': [0.0, 0.0, 0.0], #initial location of the agent
