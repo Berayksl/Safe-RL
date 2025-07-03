@@ -27,6 +27,7 @@ class Continuous2DEnv:
         self.action_max = config.get("action_max")
         self.action_min = config.get("action_min")
         self.dynamics = config.get("dynamics", "unicycle")
+        self.u_agent_max = config.get("u_agent_max", None)  # max agent speed
 
         self.initial_target_centers = {target_index: self.targets[target_index]['center'] for target_index in self.targets.keys()}
         self.simulation_timer = 0
@@ -52,10 +53,11 @@ class Continuous2DEnv:
             self.obstacle_plot = plt.Circle(self.obstacle_location, self.obstacle_size, color='r', alpha=0.5, label='Obstacle')
             #self.target_region_plot = plt.Circle(self.target_region_center, self.target_region_radius, color='b', fill=False, linestyle='-', label='Target Region')
             #self.ax.add_patch(self.target_region_plot)
+            self.safe_region_plots = []
             self.ax.add_patch(self.goal_plot)
             self.ax.add_patch(self.obstacle_plot)
             self.ax.legend()
-            self.ani = animation.FuncAnimation(self.fig, self.update_animation, interval=10)
+            self.ani = animation.FuncAnimation(self.fig, self.update_animation, interval=10, cache_frame_data=False)
 
 
     # def precompute_cbf_values(self, resolution=500):
@@ -86,26 +88,28 @@ class Continuous2DEnv:
 
 
 
-    def plot_cbf_zero_level(self, target_center, target_radius, u_agent_max, u_target_max, remaining_t, resolution=100):
+    def cbf_zero_level(self, targets, u_agent_max, resolution=200):
 
         xlim = (-self.width, self.width)
         ylim = (-self.height, self.height)
 
         x_vals = np.linspace(xlim[0], xlim[1], resolution)
         y_vals = np.linspace(ylim[0], ylim[1], resolution)
+
         X, Y = np.meshgrid(x_vals, y_vals)
 
-        Z = np.zeros_like(X)
-        for i in range(X.shape[0]):
-            for j in range(X.shape[1]):
-                state = (X[i, j], Y[i, j])
-                Z[i, j] = CBF(state, remaining_t, u_agent_max, target_center, target_radius, u_target_max)
+        cbf_levels = {}
 
-        # plt.figure(figsize=(8, 6))
-        # contour = plt.contour(X, Y, Z, levels=[0], colors='red')
-        # plt.clabel(contour, fmt='CBF=0', inline=True)
+        for target_index in targets.keys():
+            Z = np.zeros_like(X)
+            for i in range(X.shape[0]):
+                for j in range(X.shape[1]):
+                    state = (X[i, j], Y[i, j])
+                    Z[i, j] = sequential_CBF(state, u_agent_max, targets, target_index)
 
-        return X,Y,Z
+            cbf_levels[target_index] = (X,Y,Z)
+
+        return cbf_levels
     
     
     def reset(self):
@@ -179,11 +183,31 @@ class Continuous2DEnv:
         dist_to_goal = np.linalg.norm(np.array([self.agent.x, self.agent.y]) - self.goal_location)
         # Check if goal is reached
         done = dist_to_goal <= self.goal_size
-        
+
+
+        #remove previous safe region plots:
+        for contour in self.safe_region_plots:
+            for coll in contour.collections:
+                try:
+                    coll.remove()
+                except ValueError:
+                    pass
+
+        self.safe_region_plots = []
+
+
+        cbf_levels = self.cbf_zero_level(self.targets, self.u_agent_max, resolution=100)
+
+        for target_index, (X, Y, Z) in cbf_levels.items():
+            contour = self.ax.contour(X, Y, Z, levels=[0], colors=self.targets[target_index]['color'], linewidths=1, linestyles='dashed', label='CBF Zero Level')
+            self.safe_region_plots.append(contour)
+
+
         if self.render:
             plt.pause(self.dt_render) #change later!!!
         
         return state, reward, done
+    
     
     def update_animation(self, frame):
         if hasattr(self, 'safe_region_plot'):
@@ -204,14 +228,9 @@ class Continuous2DEnv:
             for target_id, target_info in self.targets.items():
                 center = target_info["center"]
                 radius = target_info["radius"]
-                patch = plt.Circle(center, radius, color='b', fill=False, linestyle='-', label='Target Region' if frame == 0 else "")
+                patch = plt.Circle(center, radius, color=target_info['color'], fill=False, linestyle='-', label='Target Region' if frame == 0 else "")
                 self.ax.add_patch(patch)
                 self.target_region_plots.append(patch)
-
-        # if self.remaining_t is not None:
-        #     X, Y, Z = self.plot_cbf_zero_level(self.target_region_center, self.target_region_radius, self.u_agent_max, self.u_target_max, self.remaining_t)
-        #     self.safe_region_plot = self.ax.contour(X, Y, Z, levels=[0], colors='red', linewidths=1, linestyles='dashed', label='CBF Zero Level')
-            #self.ax.add_patch(self.safe_region_plot)
 
 
         # Update the agent's position in the plot
@@ -247,6 +266,35 @@ class Continuous2DEnv:
 
                 x_new = x0 + np.cos(heading_angle) * u_target_max * current_t
                 y_new = x0 + np.sin(heading_angle) * u_target_max * current_t
+
+            elif movement_type == "static":
+                #no movement, just return the current position
+                x_new, y_new = self.targets[target_id]['center']
+
+            elif movement_type == "periodic":
+                # New movement type: periodic back-and-forth between two points
+                point1 = np.array(self.targets[target_id]['movement']['point1'])
+                point2 = np.array(self.targets[target_id]['movement']['point2'])
+                u_target_max = self.targets[target_id]['u_max']
+
+                total_distance = np.linalg.norm(point2 - point1)
+                total_time = total_distance / u_target_max
+
+                # Determine current phase within the full cycle (forth + back)
+                cycle_time = 2 * total_time
+                t_mod = current_t % cycle_time
+
+                if t_mod < total_time:
+                    # Moving from point1 to point2
+                    alpha = t_mod / total_time
+                    position = point1 + alpha * (point2 - point1)
+                else:
+                    # Moving back from point2 to point1
+                    alpha = (t_mod - total_time) / total_time
+                    position = point2 - alpha * (point2 - point1)
+
+                x_new, y_new = position[0], position[1]
+
 
         return (x_new, y_new)
 

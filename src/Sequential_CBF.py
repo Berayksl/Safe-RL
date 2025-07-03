@@ -2,6 +2,7 @@
 import numpy as np
 import cvxpy as cp
 import matplotlib.pyplot as plt
+import copy
 
 
 
@@ -151,12 +152,17 @@ if __name__ == "__main__":
     u_target_max0 = 2 # max speed of the target
     u_target_max1 = 2
 
+    sequence = [1, 2, 1, 2, 1, 2]
+
+
     targets = {
         0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}},
         1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,-30)}}, #heading angle is in rad
-        2: {'center': (35, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(30,-30)}}
+        #2: {'center': (35, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(30,-30)}}
         #2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}}
     }
+
+    initial_targets = [(key, copy.deepcopy(value)) for key, value in targets.items()] #copy the targets into a list to iterate over them
 
     #config dictionary for the environment
     config = {
@@ -192,13 +198,15 @@ if __name__ == "__main__":
     t = 0
 
     while t <= episode_length and len(targets) > 0:
+        print(targets)
+        #print(targets)
         #calculate the CBF values for each target region and take the minimum:
         cbf_values = {}
         for target_index in targets.keys():
             cbf_value = sequential_CBF(state, u_agent_max, targets, target_index)
             cbf_values[target_index] = cbf_value
 
-        print(cbf_values)
+        #print(cbf_values)
 
         min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
 
@@ -226,6 +234,7 @@ if __name__ == "__main__":
             
             if signed_distance <= 0:
                 targets.pop(target_index)  # Remove target region if the agent is inside it
+                targets[target_index] = copy.deepcopy(initial_targets[target_index][1])  # add the target region back to the dictionary with the initial parameters
 
         t += 1
 

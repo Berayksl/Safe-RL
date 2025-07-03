@@ -192,7 +192,7 @@ class SAC:
         frame_idx = 0 #num of frames so far
         infeasible_solutions = 0 #number of infeasible solutions found during training
 
-        initial_targets = [(key, value) for key, value in self.CBF_params['targets'].items()]
+        initial_targets = [(key, copy.deepcopy(value)) for key, value in self.CBF_params['targets'].items()]
         u_agent_max = self.CBF_params['u_agent_max']
 
         global_t = 0
@@ -200,10 +200,9 @@ class SAC:
         targets = self.CBF_params['targets']
         for eps in range(self.num_episodes):
             #reset the targets
-            for target in initial_targets:
-                targets[target[0]] = target[1]
-            
-            
+            # for target in initial_targets:
+            #     targets[target[0]] = copy.deepcopy(target[1]) #use a deep copy to reset the target dictionaries
+          
             state =  self.env.reset()
             episode_reward = 0
 
@@ -267,8 +266,9 @@ class SAC:
                     
                     if signed_distance <= 0:
                         targets.pop(target_index)  # Remove target region if the agent is inside it
+                        targets[target_index] = copy.deepcopy(initial_targets[target_index][1])  # add the target region back to the dictionary with the initial parameters
 
-                
+
                 #print('reward;',reward)     
                 self.replay_buffer.push(state, action, reward, next_state, done)
                 

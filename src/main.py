@@ -99,15 +99,16 @@ def test(env, ppo_model, action_range, actor_model, max_timesteps_per_episode):
 if __name__ == "__main__":
 
 	target_region_center = [-10, 2]
-	target_region_radius = 5
+	target_region_radius = 8
 	action_range = [2, 2] #max vx and vy (for single integrator dynamics)
 
 	u_target_max0 = 2
 	u_target_max1 = 2
+	u_agent_max = 8 #max agent speed
 	
 	targets = {
-	0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}},
-	1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,-30)}}, #heading angle is in rad
+	0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
+	1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
 	#2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}}
     }
 
@@ -127,7 +128,8 @@ if __name__ == "__main__":
 		'deterministic': False,
 		'auto_entropy':True,
 		"dynamics": "single integrator", #dynamics model to use
-		"targets": targets
+		"targets": targets,
+		"u_agent_max": u_agent_max, #max target speed
     }
 
 
@@ -137,7 +139,7 @@ if __name__ == "__main__":
         "target_region_radius": target_region_radius,
 		'epsilon' : 0.5, #for reference point,
 		'alpha': 1.5, #weight for the CBF term
-		"u_agent_max": 10, #max agent speed
+		"u_agent_max": u_agent_max, #max agent speed
 		"targets": targets
     }
 
