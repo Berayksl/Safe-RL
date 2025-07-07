@@ -98,8 +98,15 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
     else:
         db_dx_target = np.array([dx / dist, dy / dist]) * (1 / u_agent_max)
 
-        
-    alpha = 1.5
+
+    alpha_min = 0.6  # never zero
+    alpha_max = 1.6
+    d_max = 20.0  # beyond this distance, alpha is at max value
+    alpha = alpha_min + (alpha_max - alpha_min) * min(dist / d_max, 1.0)
+
+    # print('alpha:', alpha)
+
+    #alpha = 1.5
 
     u_min = np.array([-u_agent_max, -u_agent_max])
     u_max = np.array([u_agent_max, u_agent_max])  # might need to change later!
@@ -136,13 +143,6 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
         print("QP failed:", prob.status)
         return None
 
-# def moving_target(t, center_of_rotation, u_target_max=2.0, omega=0.1):
-#     x0, y0 = center_of_rotation
-#     turn_radius = u_target_max/omega
-
-#     xc = x0 + np.cos(omega * t) * turn_radius
-#     yc = y0 + np.sin(omega * t) * turn_radius
-#     return (xc, yc)
 
 
 if __name__ == "__main__":
@@ -151,13 +151,14 @@ if __name__ == "__main__":
     target_region_radius = 8.0  # radius of the target region
     u_target_max0 = 2 # max speed of the target
     u_target_max1 = 2
+    u_agent_max = 10.0  #max agent speed
 
     sequence = [1, 2, 1, 2, 1, 2]
 
 
     targets = {
-        0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}},
-        1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,-30)}}, #heading angle is in rad
+        0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
+        1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
         #2: {'center': (35, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(30,-30)}}
         #2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}}
     }
@@ -178,10 +179,11 @@ if __name__ == "__main__":
         "obstacle_size": 0.0,
         "targets": targets,  # dictionary of targets for the CBF
         "dynamics": "single integrator", #dynamics model to use
+        'u_agent_max': u_agent_max, #max agent speed
         "randomize_loc": False #whether to randomize the agent location at the end of each episode
     }
     
-    u_agent_max = 10.0  #max agent speed
+   
     #CBF parameters
 
     env = Continuous2DEnv(config)
@@ -198,7 +200,6 @@ if __name__ == "__main__":
     t = 0
 
     while t <= episode_length and len(targets) > 0:
-        print(targets)
         #print(targets)
         #calculate the CBF values for each target region and take the minimum:
         cbf_values = {}
@@ -206,7 +207,7 @@ if __name__ == "__main__":
             cbf_value = sequential_CBF(state, u_agent_max, targets, target_index)
             cbf_values[target_index] = cbf_value
 
-        #print(cbf_values)
+        print(cbf_values)
 
         min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
 
@@ -220,7 +221,7 @@ if __name__ == "__main__":
 
         state, reward, done = env.step(action)
 
-        
+        t += 1
         #decrease the remaining time and update the center for each target region
         for target_index in list(targets.keys()):
             targets[target_index]['remaining_time'] -= 1
@@ -232,11 +233,39 @@ if __name__ == "__main__":
             dist = np.linalg.norm(state[:2] - target_center)
             signed_distance = dist - target_radius
             
-            if signed_distance <= 0:
+            if signed_distance <= 0: #hold inside the target region
+                targets[target_index]['remaining_time'] = 0 #set the remaining time to 0 to hold inside the target region
+
+                for i in targets.keys():
+                    cbf_value = sequential_CBF(state, u_agent_max, targets, i)
+                    cbf_values[i] = cbf_value
+
+                min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
+                
+                while min_key == target_index:
+                    #print(targets)
+                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, t, targets, action_rl)
+                    action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
+
+                    state, reward, done = env.step(action)
+
+                    for i in targets.keys():
+                        cbf_value = sequential_CBF(state, u_agent_max, targets, i)
+                        cbf_values[i] = cbf_value
+                        if i != target_index:
+                            targets[i]['remaining_time'] -= 1
+
+                    print(cbf_values)
+
+                    min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
+
+                    t += 1
+
+
                 targets.pop(target_index)  # Remove target region if the agent is inside it
                 targets[target_index] = copy.deepcopy(initial_targets[target_index][1])  # add the target region back to the dictionary with the initial parameters
 
-        t += 1
+        
 
         if done:
             break

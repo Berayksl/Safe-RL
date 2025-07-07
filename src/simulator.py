@@ -184,23 +184,24 @@ class Continuous2DEnv:
         # Check if goal is reached
         done = dist_to_goal <= self.goal_size
 
+        #TO PLOT THE 0 LEVEL CONTOURS:
 
         #remove previous safe region plots:
-        for contour in self.safe_region_plots:
-            for coll in contour.collections:
-                try:
-                    coll.remove()
-                except ValueError:
-                    pass
+        # for contour in self.safe_region_plots:
+        #     for coll in contour.collections:
+        #         try:
+        #             coll.remove()
+        #         except ValueError:
+        #             pass
 
-        self.safe_region_plots = []
+        # self.safe_region_plots = []
 
 
-        cbf_levels = self.cbf_zero_level(self.targets, self.u_agent_max, resolution=100)
+        # cbf_levels = self.cbf_zero_level(self.targets, self.u_agent_max, resolution=100)
 
-        for target_index, (X, Y, Z) in cbf_levels.items():
-            contour = self.ax.contour(X, Y, Z, levels=[0], colors=self.targets[target_index]['color'], linewidths=1, linestyles='dashed', label='CBF Zero Level')
-            self.safe_region_plots.append(contour)
+        # for target_index, (X, Y, Z) in cbf_levels.items():
+        #     contour = self.ax.contour(X, Y, Z, levels=[0], colors=self.targets[target_index]['color'], linewidths=1, linestyles='dashed', label='CBF Zero Level')
+        #     self.safe_region_plots.append(contour)
 
 
         if self.render:

@@ -48,7 +48,7 @@ class SoftQNetwork(nn.Module):
 
 
 class PolicyNetwork(nn.Module):
-    def __init__(self, num_inputs, num_actions, hidden_size, device, action_range=np.array([0.6, 0.6]), init_w=3e-3, log_std_min=-20, log_std_max=2):
+    def __init__(self, num_inputs, num_actions, hidden_size, device, action_range, init_w=3e-3, log_std_min=-20, log_std_max=2):
         super(PolicyNetwork, self).__init__()
         
         self.device = device
@@ -111,10 +111,13 @@ class PolicyNetwork(nn.Module):
         
         normal = Normal(0, 1)
         z      = normal.sample(mean.shape).to(self.device)
-        action = self.action_range* torch.tanh(mean + std*z)
-        
-        action = self.action_range* torch.tanh(mean).detach().cpu().numpy()[0] if deterministic else action.detach().cpu().numpy()[0]
-        return action
+
+        if deterministic:
+            action = self.action_range * torch.tanh(mean)
+        else:
+            action = self.action_range * torch.tanh(mean + std*z)
+
+        return action.detach().cpu().numpy()[0]
 
     #TODO: fix this function to make it generalizable for different action ranges
     def sample_action(self,):

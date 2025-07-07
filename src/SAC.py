@@ -116,7 +116,7 @@ class SAC:
         self.auto_entropy = hyperparameters.get("auto_entropy", True) #whether to use automatic entropy tuning or not
 
         #
-        self.action_range = hyperparameters.get("action_range", [5, 5]) #max speed and max turning rate
+        self.action_range = hyperparameters.get("action_range", None) #max speed and max turning rate
         
         #CBF parameters:
         self.CBF = hyperparameters.get("CBF", False) #whether to use CBF or not
@@ -321,8 +321,6 @@ class SAC:
 
 
 
-
-
     def save_model(self):
         model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models')
         os.makedirs(model_dir, exist_ok=True)
@@ -333,14 +331,15 @@ class SAC:
         print('Model saved!')
 
 
-    # def load_model(self, path):
-    #     self.soft_q_net1.load_state_dict(torch.load(path+'_q1'))
-    #     self.soft_q_net2.load_state_dict(torch.load(path+'_q2'))
-    #     self.policy_net.load_state_dict(torch.load(path+'_policy'))
+    def load_model(self, path):
+        # self.soft_q_net1.load_state_dict(torch.load(path+'_q1'))
+        # self.soft_q_net2.load_state_dict(torch.load(path+'_q2'))
+        self.policy_net.load_state_dict(torch.load(path))
 
-    #     self.soft_q_net1.eval()
-    #     self.soft_q_net2.eval()
-    #     self.policy_net.eval()
+        # self.soft_q_net1.eval()
+        # self.soft_q_net2.eval()
+        self.policy_net.eval()
+
 
     def _log_summary(self):
         """

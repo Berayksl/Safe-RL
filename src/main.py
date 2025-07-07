@@ -11,7 +11,7 @@ import os
 
 from arguments import get_args
 from SAC import SAC
-#from eval_policy import eval_policy
+from evaluate_policy import eval_policy
 import tkinter as tk
 from tkinter import filedialog
 
@@ -60,7 +60,7 @@ def train(env,hyperparameters, actor_model, critic_model):
 
 	model.train()
 
-def test(env, ppo_model, action_range, actor_model, max_timesteps_per_episode):
+def test(env, hyperparameters, model_path, max_timesteps_per_episode):
 	"""
 		Tests the model.
 
@@ -71,10 +71,10 @@ def test(env, ppo_model, action_range, actor_model, max_timesteps_per_episode):
 		Return:
 			None
 	"""
-	print(f"Testing {actor_model}", flush=True)
+	print(f"Testing {model_path}", flush=True)
 
 	#if the actor model is not specified, then exit
-	if actor_model == '':
+	if model_path == '':
 		print(f"Didn't specify model file. Exiting.", flush=True)
 		sys.exit(0)
 
@@ -82,17 +82,14 @@ def test(env, ppo_model, action_range, actor_model, max_timesteps_per_episode):
 	obs_dim = env.observation_space.shape[0]
 	act_dim = env.action_space.shape[0]
 
-	if ppo_model == 'gaussian':
-		# Build our policy the same way we build our actor model in PPO
-		policy = FeedForwardNN(obs_dim, act_dim)
-
-	elif ppo_model == 'beta':
-		policy = BetaPolicyNetwork(obs_dim, act_dim)
+	model = SAC(env = env, **hyperparameters)
 
 	# Load in the actor model saved by the PPO algorithm
-	policy.load_state_dict(torch.load(actor_model))
+	model.load_model(model_path)
 
-	eval_policy(policy=policy, ppo_model= ppo_model, action_range = action_range, env=env, max_timesteps_per_episode=max_timesteps_per_episode)
+	policy = model.policy_net
+
+	eval_policy(policy=policy, env=env, max_timesteps_per_episode=max_timesteps_per_episode)
 
 
 
@@ -100,7 +97,7 @@ if __name__ == "__main__":
 
 	target_region_center = [-10, 2]
 	target_region_radius = 8
-	action_range = [2, 2] #max vx and vy (for single integrator dynamics)
+	action_range = [3, 3] #max vx and vy (for single integrator dynamics)
 
 	u_target_max0 = 2
 	u_target_max1 = 2
@@ -108,8 +105,8 @@ if __name__ == "__main__":
 	
 	targets = {
 	0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
-	1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
-	#2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}}
+	1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': -0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
+	#2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': 0.05	, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}, 'color': 'green'}
     }
 
     #config dictionary for the environment
@@ -118,10 +115,10 @@ if __name__ == "__main__":
         "width": 100.0,
         "height": 100.0,
         "dt": 1,
-        "render": True,
+        "render": False,
 		'dt_render': 0.1,
-        "goal_location": [18.0, 13.0],
-        "goal_size": 5,
+        "goal_location": [20.0, 13.0],
+        "goal_size": 10,
         "obstacle_location": [100.0, 100.0],
         "obstacle_size": 0.0,
         "randomize_loc": False, #whether to randomize the agent location at the end of each episode
@@ -151,7 +148,7 @@ if __name__ == "__main__":
 				'hidden_size': 256, 
 				'buffer_size': int(1e6),
 				'batch_size': 256,
-				'max_timesteps_per_episode': 200, 
+				'max_timesteps_per_episode': 300, 
 				'num_episodes': 40,
 				'n_updates_per_iteration': 1,
 				'deterministic': False,
@@ -174,10 +171,9 @@ if __name__ == "__main__":
 	elif args.mode == 'test':
 		config['render'] = True #enable rendering for testing
 		config['dt_render'] = 0.1
-		config['init_loc'] = [0.0, 0.0, 0.0]
+		config['init_loc'] = [0.0, -1]
 		env = Continuous2DEnv(config)
-		ppo_model = 'gaussian'
 		max_timesteps_per_episode = hyperparameters['max_timesteps_per_episode']
 		# Load in the model file
 		model_path= select_model_file()
-		test(env=env, ppo_model = ppo_model, action_range= action_range, actor_model=model_path, max_timesteps_per_episode=max_timesteps_per_episode)
+		test(env=env, hyperparameters=hyperparameters, model_path=model_path, max_timesteps_per_episode=max_timesteps_per_episode)
