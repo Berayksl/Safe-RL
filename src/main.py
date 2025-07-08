@@ -99,15 +99,33 @@ if __name__ == "__main__":
 	target_region_radius = 8
 	action_range = [3, 3] #max vx and vy (for single integrator dynamics)
 
-	u_target_max0 = 2
-	u_target_max1 = 2
+	u_target_max0 = 1.5
+	u_target_max1 = 1.5
 	u_agent_max = 8 #max agent speed
 	
+	# targets = {
+	# 0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
+	# 1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': -0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
+	# #2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': 0.05	, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}, 'color': 'green'}
+    # }
+
+	t1_p1 = (-30, 30)
+	t1_p2 = (30, 30)
+	t2_p1 = (30, -30)
+	t2_p2 = (-30, -30)
+
+
 	targets = {
-	0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
-	1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': -0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
+	0: {'center': (-40, 40), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'periodic', 'point1': t1_p1, 'point2': t1_p2, 'heading_angle': np.arctan2(t1_p2[1] - t1_p1[1], t1_p2[0] - t1_p1[0])}, 'color': 'blue'}, #heading angle is in rad
+	1: {'center': (-40, -40), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'periodic', 'point1': t2_p1, 'point2': t2_p2, 'heading_angle': np.arctan2(t2_p2[1] - t2_p1[1], t2_p2[0] - t2_p1[0])}, 'color': 'red'}, #heading angle is in rad
 	#2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': 0.05	, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}, 'color': 'green'}
     }
+
+
+	goals = {
+	0: {'center': (50, 0), 'radius': 10}, #goal region for the agent
+	1: {'center': (-50, 0), 'radius': 10}
+	}
 
     #config dictionary for the environment
 	config = {
@@ -115,10 +133,9 @@ if __name__ == "__main__":
         "width": 100.0,
         "height": 100.0,
         "dt": 1,
-        "render": False,
-		'dt_render': 0.1,
-        "goal_location": [20.0, 13.0],
-        "goal_size": 10,
+        "render": True,
+		'dt_render': 0.03,
+		'goals': goals, #goal regions for the agent
         "obstacle_location": [100.0, 100.0],
         "obstacle_size": 0.0,
         "randomize_loc": False, #whether to randomize the agent location at the end of each episode
@@ -149,7 +166,7 @@ if __name__ == "__main__":
 				'buffer_size': int(1e6),
 				'batch_size': 256,
 				'max_timesteps_per_episode': 300, 
-				'num_episodes': 40,
+				'num_episodes': 50,
 				'n_updates_per_iteration': 1,
 				'deterministic': False,
 				'auto_entropy':True,

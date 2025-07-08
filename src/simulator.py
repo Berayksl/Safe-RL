@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import math
+import time
 
 from dynamics import UnicycleDynamics, SingleIntegratorDynamics
 from Sequential_CBF import sequential_CBF
@@ -17,8 +17,7 @@ class Continuous2DEnv:
         self.dt = config.get("dt", 0.1)
         self.render = config.get("render", False)
         self.dt_render = config.get("dt_render", 0.001)
-        self.goal_location = np.array(config.get("goal_location", [8.0, 8.0]))
-        self.goal_size = config.get("goal_size", 0.5)
+        self.goals = config.get("goals", None)  # dictionary of goals for the agent
         self.obstacle_location = np.array(config.get("obstacle_location", [4.0, 4.0]))
         self.obstacle_size = config.get("obstacle_size", 0.5)
         self.random_loc = config.get("randomize_loc", True)
@@ -49,15 +48,27 @@ class Continuous2DEnv:
             self.ax.set_xlim(-self.width, self.width)
             self.ax.set_ylim(-self.height, self.height)
             self.agent_plot, = self.ax.plot([], [], 'ro', label='Agent')
-            self.goal_plot = plt.Circle(self.goal_location, self.goal_size, color='g', alpha=0.5, label='Goal')
+
+            self.goal_plots = []
+            for goal in self.goals.values():
+                goal_plot = plt.Circle(goal['center'], goal['radius'], color='g', alpha=0.5, label='Goal')
+                self.goal_plots.append(goal_plot)
+                self.ax.add_patch(goal_plot)
+
             self.obstacle_plot = plt.Circle(self.obstacle_location, self.obstacle_size, color='r', alpha=0.5, label='Obstacle')
             #self.target_region_plot = plt.Circle(self.target_region_center, self.target_region_radius, color='b', fill=False, linestyle='-', label='Target Region')
             #self.ax.add_patch(self.target_region_plot)
             self.safe_region_plots = []
-            self.ax.add_patch(self.goal_plot)
+            self.target_region_patches = []
             self.ax.add_patch(self.obstacle_plot)
             self.ax.legend()
-            self.ani = animation.FuncAnimation(self.fig, self.update_animation, interval=10, cache_frame_data=False)
+            #self.ani = animation.FuncAnimation(self.fig, self.update_animation, interval=10, cache_frame_data=False)
+            self.fig.show()
+            self.fig.canvas.draw()
+
+
+
+
 
 
     # def precompute_cbf_values(self, resolution=500):
@@ -145,19 +156,37 @@ class Continuous2DEnv:
 
         return state
     
-    def compute_reward(self):
-        """Computes the dense reward based on distance to the goal."""
-        dist_to_goal = np.linalg.norm(np.array([self.agent.x, self.agent.y]) - self.goal_location)
-        #dist_to_obstacle = np.linalg.norm(np.array([self.agent.x, self.agent.y]) - self.obstacle_location)
-        reward = -dist_to_goal
-        # if dist_to_obstacle <= self.obstacle_size:
-        #     reward -= 10  # Penalty for hitting an obstacle
-        
-        if dist_to_goal <= self.goal_size:
-            reward += 100  # Reward for reaching the goal
-            #print("Goal Reached!")
+    # def compute_reward(self):
+    #     """Computes the dense reward based on distance to the goal."""
+    #     dist_to_goal = np.linalg.norm(np.array([self.agent.x, self.agent.y]) - self.goal_location)
 
-        return reward 
+    #     reward = -dist_to_goal
+    #     # if dist_to_obstacle <= self.obstacle_size:
+    #     #     reward -= 10  # Penalty for hitting an obstacle
+        
+    #     if dist_to_goal <= self.goal_size:
+    #         reward += 100  # Reward for reaching the goal
+    #         #print("Goal Reached!")
+
+    #     return reward
+    
+
+
+    def compute_reward(self): #updated to include multiple targets
+        pos = np.array([self.agent.x, self.agent.y])
+        # List of distances to all target centers
+        dists = [np.linalg.norm(pos - np.array(t['center'])) for t in self.goals.values()]
+        dist_min = min(dists)
+        
+        reward = -dist_min  # Dense part: encourages reaching nearest target
+        
+        # Sparse bonus if agent enters any target region
+        for t in self.targets.values():
+            if dist_min <= t['radius']:
+                reward += 100
+                break
+        
+        return reward
     
     def step(self, action):
         """
@@ -180,9 +209,10 @@ class Continuous2DEnv:
         # Compute reward
         reward = self.compute_reward()
 
-        dist_to_goal = np.linalg.norm(np.array([self.agent.x, self.agent.y]) - self.goal_location)
-        # Check if goal is reached
-        done = dist_to_goal <= self.goal_size
+        # Calculate distance to the goals
+        dist_to_goals = {goal_id: np.linalg.norm(np.array([self.agent.x, self.agent.y]) - np.array(goal['center'])) for goal_id, goal in self.goals.items()}
+        # Check if any goal is reached
+        done = any(dist <= goal['radius'] for dist, goal in zip(dist_to_goals.values(), self.goals.values()))
 
         #TO PLOT THE 0 LEVEL CONTOURS:
 
@@ -205,41 +235,60 @@ class Continuous2DEnv:
 
 
         if self.render:
-            plt.pause(self.dt_render) #change later!!!
-        
+            self.update_plot()
+                
         return state, reward, done
     
     
-    def update_animation(self, frame):
-        if hasattr(self, 'safe_region_plot'):
-            for coll in self.safe_region_plot.collections:
-                try:
-                    coll.remove()
-                except ValueError:
-                    pass  # It's already removed
+    def update_plot(self):
+        time.sleep(self.dt_render)
+        # Update agent position
+        self.agent_plot.set_data([self.agent.x], [self.agent.y])
+        
+        # Update targets' positions
+        for patch in self.target_region_patches:
+            patch.remove()  # remove old
 
-        if hasattr(self, 'target_region_plots'):
-            for patch in self.target_region_plots:
-                if patch in self.ax.patches:
-                    patch.remove()
+        self.target_region_patches = []
+        for target_id, target_info in self.targets.items():
+            patch = plt.Circle(target_info["center"], target_info["radius"], color=target_info['color'], fill=False, linestyle='-')
+            self.ax.add_patch(patch)
+            self.target_region_patches.append(patch)
+        
+        # Redraw
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
 
-        self.target_region_plots = []
+    # def update_animation(self, frame):
+    #     if hasattr(self, 'safe_region_plot'):
+    #         for coll in self.safe_region_plot.collections:
+    #             try:
+    #                 coll.remove()
+    #             except ValueError:
+    #                 pass  # It's already removed
 
-        if self.targets:
-            for target_id, target_info in self.targets.items():
-                center = target_info["center"]
-                radius = target_info["radius"]
-                patch = plt.Circle(center, radius, color=target_info['color'], fill=False, linestyle='-', label='Target Region' if frame == 0 else "")
-                self.ax.add_patch(patch)
-                self.target_region_plots.append(patch)
+    #     if hasattr(self, 'target_region_plots'):
+    #         for patch in self.target_region_plots:
+    #             if patch in self.ax.patches:
+    #                 patch.remove()
+
+    #     self.target_region_plots = []
+
+    #     if self.targets:
+    #         for target_id, target_info in self.targets.items():
+    #             center = target_info["center"]
+    #             radius = target_info["radius"]
+    #             patch = plt.Circle(center, radius, color=target_info['color'], fill=False, linestyle='-', label='Target Region' if frame == 0 else "")
+    #             self.ax.add_patch(patch)
+    #             self.target_region_plots.append(patch)
 
 
-        # Update the agent's position in the plot
-        x = np.array([self.agent.x])  # Convert scalar to NumPy array
-        y = np.array([self.agent.y])  # Convert scalar to NumPy array
+    #     # Update the agent's position in the plot
+    #     x = np.array([self.agent.x])  # Convert scalar to NumPy array
+    #     y = np.array([self.agent.y])  # Convert scalar to NumPy array
 
-        self.agent_plot.set_data(x, y)
-        self.ax.legend()
+    #     self.agent_plot.set_data(x, y)
+    #     self.ax.legend()
 
     def dynamic_target(self, current_t, target_id):
         if self.targets is not None:
@@ -289,25 +338,26 @@ class Continuous2DEnv:
                     # Moving from point1 to point2
                     alpha = t_mod / total_time
                     position = point1 + alpha * (point2 - point1)
+                    direction_vector = point2 - point1
                 else:
                     # Moving back from point2 to point1
                     alpha = (t_mod - total_time) / total_time
                     position = point2 - alpha * (point2 - point1)
+                    direction_vector = point1 - point2
 
                 x_new, y_new = position[0], position[1]
+
+                heading_angle = np.arctan2(direction_vector[1], direction_vector[0])
+
+
+                # Update heading angle in targets dictionary
+                self.targets[target_id]['movement']['heading_angle'] = heading_angle
 
 
         return (x_new, y_new)
 
                
-
-
-    def render_env(self):
-        """Renders the environment continuously if enabled."""
-        plt.show()
-
     
-
 
 if __name__ == "__main__":
     #config dictionary for the environment

@@ -115,7 +115,7 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
         omega = targets[target_index]['movement']['omega']
         u_target = np.array([np.cos(omega*current_t) * u_target_max, np.sin(omega*current_t) * u_target_max])
 
-    elif target_movement_type == 'straight':
+    elif target_movement_type == 'straight' or target_movement_type == 'periodic':
         heading_angle = targets[target_index]['movement']['heading_angle']
         u_target = np.array([np.cos(heading_angle) * u_target_max, np.sin(heading_angle) * u_target_max])
 
@@ -155,15 +155,23 @@ if __name__ == "__main__":
 
     sequence = [1, 2, 1, 2, 1, 2]
 
+    point1 = (-20, 10)
+    point2 = (20, 10)
 
     targets = {
-        0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
-        1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
+        0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'periodic', 'point1': point1, 'point2': point2, 'heading_angle': np.arctan2(point2[1] - point1[1], point2[0] - point1[0])}, 'color': 'blue'}
+        #0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
+        #1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
         #2: {'center': (35, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(30,-30)}}
         #2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}}
     }
 
     initial_targets = [(key, copy.deepcopy(value)) for key, value in targets.items()] #copy the targets into a list to iterate over them
+
+    goals = {
+	0: {'center': (20, 13), 'radius': 10}, #goal region for the agent
+	1: {'center': (-40, 13), 'radius': 10}
+	}
 
     #config dictionary for the environment
     config = {
@@ -173,8 +181,7 @@ if __name__ == "__main__":
         "dt": 1,
         "render": True,
         'dt_render': 0.1,
-        "goal_location": [8.0, 8.0],
-        "goal_size": 0,
+        "goals": goals,  # goal regions for the agent
         "obstacle_location": [100.0, 100.0],
         "obstacle_size": 0.0,
         "targets": targets,  # dictionary of targets for the CBF
@@ -193,7 +200,7 @@ if __name__ == "__main__":
 
     action = action_rl
 
-    episode_length = 300
+    episode_length = 10000
 
     distances = []
 
@@ -207,7 +214,7 @@ if __name__ == "__main__":
             cbf_value = sequential_CBF(state, u_agent_max, targets, target_index)
             cbf_values[target_index] = cbf_value
 
-        print(cbf_values)
+        # print(cbf_values)
 
         min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
 
@@ -255,7 +262,7 @@ if __name__ == "__main__":
                         if i != target_index:
                             targets[i]['remaining_time'] -= 1
 
-                    print(cbf_values)
+                    # print(cbf_values)
 
                     min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
 
@@ -267,8 +274,8 @@ if __name__ == "__main__":
 
         
 
-        if done:
-            break
+        # if done:
+        #     break
     
     if targets == {}:
         print("Task completed!")
