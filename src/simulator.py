@@ -201,6 +201,11 @@ class Continuous2DEnv:
             x_new, y_new = self.dynamic_target(self.simulation_timer, target_index)
             self.targets[target_index]['center'] = (x_new, y_new)
 
+        #update the goal states:
+        for goal_id in self.goals.keys():
+            x_new, y_new = self.dynamic_goal(self.simulation_timer, goal_id)
+            self.goals[goal_id]['center'] = (x_new, y_new)
+
         self.simulation_timer += 1
 
         self.agent.x = np.clip(self.agent.x, -self.width, self.width)
@@ -254,7 +259,18 @@ class Continuous2DEnv:
             patch = plt.Circle(target_info["center"], target_info["radius"], color=target_info['color'], fill=False, linestyle='-')
             self.ax.add_patch(patch)
             self.target_region_patches.append(patch)
-        
+
+
+        # Update goals' positions
+        for goal_plot in self.goal_plots:
+            goal_plot.remove()
+
+        self.goal_plots = []
+        for goal_id, goal_info in self.goals.items():
+            patch = plt.Circle(goal_info["center"], goal_info["radius"], color='g', alpha=0.5, label='Goal')
+            self.ax.add_patch(patch)
+            self.goal_plots.append(patch)
+
         # Redraw
         self.fig.canvas.draw_idle()
         self.fig.canvas.flush_events()
@@ -356,7 +372,61 @@ class Continuous2DEnv:
 
         return (x_new, y_new)
 
-               
+    def dynamic_goal(self, current_t, goal_id):
+        if self.goals is not None:
+            movement_type = self.goals[goal_id]['movement']['type']
+            if movement_type == 'static':
+                # No movement, just return the current position
+                x_new, y_new = self.goals[goal_id]['center']
+            elif movement_type == 'periodic':
+                # New movement type: periodic back-and-forth between two points
+                point1 = np.array(self.goals[goal_id]['movement']['point1'])
+                point2 = np.array(self.goals[goal_id]['movement']['point2'])
+                u_goal_max = self.goals[goal_id]['u_max']
+
+                total_distance = np.linalg.norm(point2 - point1)
+                total_time = total_distance / u_goal_max
+
+                # Determine current phase within the full cycle (forth + back)
+                cycle_time = 2 * total_time
+                t_mod = current_t % cycle_time
+
+                if t_mod < total_time:
+                    # Moving from point1 to point2
+                    alpha = t_mod / total_time
+                    position = point1 + alpha * (point2 - point1)
+                    direction_vector = point2 - point1
+                else:
+                    # Moving back from point2 to point1
+                    alpha = (t_mod - total_time) / total_time
+                    position = point2 - alpha * (point2 - point1)
+                    direction_vector = point1 - point2
+
+                x_new, y_new = position[0], position[1]
+
+                heading_angle = np.arctan2(direction_vector[1], direction_vector[0])
+
+                # Update heading angle in goals dictionary
+                self.goals[goal_id]['movement']['heading_angle'] = heading_angle
+
+            elif movement_type == 'blinking':
+                # Blinking movement: switch between two points every blink_duration
+                point1 = np.array(self.goals[goal_id]['movement']['point1'])
+                point2 = np.array(self.goals[goal_id]['movement']['point2'])
+                blink_duration = self.goals[goal_id]['movement']['blink_duration']
+
+                # Determine if we are in the first or second half of the blink cycle
+                if (current_t // blink_duration) % 2 == 0:
+                    x_new, y_new = point1[0], point1[1]
+                else:
+                    x_new, y_new = point2[0], point2[1]
+                
+            else:
+                raise NotImplementedError(f"Movement type '{movement_type}' for goal not implemented.")
+        else:
+            raise ValueError("No goals defined in the environment.")
+
+        return (x_new, y_new)
     
 
 if __name__ == "__main__":

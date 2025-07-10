@@ -100,7 +100,7 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
 
 
     alpha_min = 0.6  # never zero
-    alpha_max = 1.6
+    alpha_max = 1.5
     d_max = 20.0  # beyond this distance, alpha is at max value
     alpha = alpha_min + (alpha_max - alpha_min) * min(dist / d_max, 1.0)
 
@@ -129,13 +129,14 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
         ]
 
     Q = np.eye(2)
-    slack_weight = 100000.0  # Weight for the slack variable
+    slack_weight = 1e4  # Weight for the slack variable
 
     objective = cp.Minimize(cp.quad_form(u, Q) + slack_weight * delta)  # Minimize control effort and slack variable
 
 
     prob = cp.Problem(objective, cbf_constraint)
-    prob.solve(solver=cp.ECOS)
+    prob.solve(solver=cp.ECOS, verbose = False)
+    #prob.solve(solver=cp.OSQP, verbose = True)
 
     if prob.status == cp.OPTIMAL or prob.status == cp.OPTIMAL_INACCURATE:
         return u.value
@@ -168,9 +169,16 @@ if __name__ == "__main__":
 
     initial_targets = [(key, copy.deepcopy(value)) for key, value in targets.items()] #copy the targets into a list to iterate over them
 
+    # goals = {
+	# 0: {'center': (20, 13), 'radius': 10}, #goal region for the agent
+	# 1: {'center': (-40, 13), 'radius': 10}
+	# }
+
+    g1_p1 = (50, -30)
+    g1_p2 = (50, 30)
+
     goals = {
-	0: {'center': (20, 13), 'radius': 10}, #goal region for the agent
-	1: {'center': (-40, 13), 'radius': 10}
+	0: {'center': (20, 13), 'radius': 10, 'movement':{'type':'blinking', 'point1': g1_p1, 'point2': g1_p2, 'blink_duration': 50, 'heading_angle': np.arctan2(g1_p2[1] - g1_p1[1], g1_p2[0] - g1_p1[0])}}, #goal region for the agent
 	}
 
     #config dictionary for the environment
@@ -180,7 +188,7 @@ if __name__ == "__main__":
         "height": 100.0,
         "dt": 1,
         "render": True,
-        'dt_render': 0.1,
+        'dt_render': 0.03,
         "goals": goals,  # goal regions for the agent
         "obstacle_location": [100.0, 100.0],
         "obstacle_size": 0.0,

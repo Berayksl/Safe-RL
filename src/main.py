@@ -102,11 +102,13 @@ if __name__ == "__main__":
 	u_target_max0 = 1.5
 	u_target_max1 = 1.5
 	u_agent_max = 8 #max agent speed
+
+
+	#CASE-1: Two targets moving in a periodic motion, one reward location
 	
 	# targets = {
 	# 0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
 	# 1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': -0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
-	# #2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': 0.05	, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}, 'color': 'green'}
     # }
 
 	t1_p1 = (-30, 30)
@@ -121,11 +123,31 @@ if __name__ == "__main__":
 	#2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': 0.05	, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}, 'color': 'green'}
     }
 
+	#Static goal region:
+
+	# goals = {
+	# 0: {'center': (50, 0), 'radius': 10, 'movement':'static'}, #goal region for the agent
+	# 1: {'center': (-50, 0), 'radius': 10, 'movement':'static'}
+	# }
+
+	# #Periodic goal region:
+	# g1_p1 = (50, 0)
+	# g1_p2 = (50, 20)
+
+
+	# goals = {
+	# 0: {'center': (50, 0), 'radius': 10, 'u_max': 0.5, 'movement':{'type':'periodic', 'point1': g1_p1, 'point2': g1_p2, 'heading_angle': np.arctan2(g1_p2[1] - g1_p1[1], g1_p2[0] - g1_p1[0])}}, #goal region for the agent
+	# }
+
+	#Blinking goal region:
+	g1_p1 = (50, -35) #point1 of the blinking goal region
+	g1_p2 = (50, 35) #point2 of the blinking goal region
 
 	goals = {
-	0: {'center': (50, 0), 'radius': 10}, #goal region for the agent
-	1: {'center': (-50, 0), 'radius': 10}
+	0: {'center': (20, 13), 'radius': 10, 'movement':{'type':'blinking', 'point1': g1_p1, 'point2': g1_p2, 'blink_duration': 50, 'heading_angle': np.arctan2(g1_p2[1] - g1_p1[1], g1_p2[0] - g1_p1[0])}}, #goal region for the agent
 	}
+
+
 
     #config dictionary for the environment
 	config = {

@@ -373,10 +373,10 @@ def perms(x):
 
 
 if __name__ == "__main__":
-    u_agent_max = 0.7
+    u_agent_max = 0.9
 
-    #roi=0.1 * np.array([[0,5,3],[4, -3, 3],[-4,-3,3]])
-    roi=0.1 * np.array([[0,5,3],[4, -3, 3]])
+    roi=0.1 * np.array([[0,5,3],[4, -3, 3],[-4,-3,3]])
+    #roi=0.1 * np.array([[0,5,3],[4, -3, 3]])
 
     n_tar = np.size(roi,0) # of targets
     roi_disj = np.copy(roi) # Create alternative RoI's (to be modified)     
@@ -385,11 +385,12 @@ if __name__ == "__main__":
 
 
 
-    t_windows=[[[0,15],[0,15]], [[0,15],[0,15]]] # STL time windows
+    #t_windows=[[[0,15],[0,15]], [[0,15],[0,15]]] # STL time windows
+    t_windows=[[[0,300],[0,100]],[[0,300],[0,100]],[[0,300],[0,100]]] # STL time windows
 
-    subformula_types = np.array([4, 4]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
+    subformula_types = np.array([4, 4, 4]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
 
-    v_tar_max = .1*np.array([.5, .5])
+    v_tar_max = .1*np.array([.5, .5, .5])
     v_tar_max_disj = np.copy(v_tar_max)  # Assume that alternative targets have the same speed bounds
     v_tar_max_all = np.copy(v_tar_max) # Maximum vel in any direct. for each target + alternative
 

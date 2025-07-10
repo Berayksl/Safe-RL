@@ -160,9 +160,9 @@ class SAC:
 
         self.soft_q_optim1.zero_grad()
         q_value_loss1.backward()
-        self.soft_q_optim1.step()
+        self.soft_q_optim1.step()                                
 
-        self.soft_q_optim2.zero_grad()
+        self.soft_q_optim2.zero_grad()                     
         q_value_loss2.backward()
         self.soft_q_optim2.step()
 
