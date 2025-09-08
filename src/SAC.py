@@ -14,11 +14,11 @@ from IPython.display import clear_output
 from IPython.display import display
 
 from networks import PolicyNetwork, SoftQNetwork, ValueNetwork
-import argparse
 import os
 from datetime import datetime
 import matplotlib.pyplot as plt
-from Sequential_CBF import *
+from Sequential_CBF_new import *
+from CLF import solve_clf_qp, clf_function
 import copy
 
 
@@ -117,10 +117,17 @@ class SAC:
 
         #
         self.action_range = hyperparameters.get("action_range", None) #max speed and max turning rate
+
+        self.online = hyperparameters.get("online", False) #whether to use online learning or not
         
         #CBF parameters:
         self.CBF = hyperparameters.get("CBF", False) #whether to use CBF or not
         self.CBF_params = hyperparameters.get("CBF_params", None) #CBF parameters, if any
+        
+        self.disturbance = hyperparameters.get("disturbance") #disturbance range in both x and y directions [w_min, w_max]
+
+        if self.disturbance is not None:
+            self.w_max = max(abs(self.disturbance[0]), abs(self.disturbance[1]))
 
 
     def update(self, batch_size, auto_entropy=True, target_entropy=-2, gamma=0.99,soft_tau=1e-2):
@@ -195,15 +202,38 @@ class SAC:
         initial_targets = [(key, copy.deepcopy(value)) for key, value in self.CBF_params['targets'].items()]
         u_agent_max = self.CBF_params['u_agent_max']
 
+        #NEW:
+        if self.disturbance is not None:
+            u_agent_max = u_agent_max - self.w_max #reduce the max agent speed by the disturbance bound (worst-case)
+
         global_t = 0
 
         targets = self.CBF_params['targets']
+        
+
         for eps in range(self.num_episodes):
-            #reset the targets
-            # for target in initial_targets:
-            #     targets[target[0]] = copy.deepcopy(target[1]) #use a deep copy to reset the target dictionaries
-          
-            state =  self.env.reset()
+            #reset the targets (episodic STL tasks)
+            for target in initial_targets:
+                targets[target[0]] = copy.deepcopy(target[1]) #use a deep copy to reset the target dictionaries
+            
+
+            if self.online and eps > 0: #if online learning, go to the next initial position using CLFs
+                radius = 5
+                x_target = np.random.uniform(-self.env.width, self.env.width)
+                y_target = np.random.uniform(-self.env.height, self.env.height)
+                target_center = np.array([x_target, y_target])
+                alpha = 1.5
+                print('Moving to initial location...')
+                while np.linalg.norm(target_center - state) - radius >= 0.0:
+                    action = solve_clf_qp(state, target_center, alpha, u_agent_max/2)
+                    next_state, reward, done = self.env.step(action)
+                    state = next_state
+
+                print('Learning continues...')
+
+            else:
+                state =  self.env.reset()
+
             episode_reward = 0
 
             step = 0 #reset step counter for each episode
@@ -214,20 +244,9 @@ class SAC:
                     print('Exploration action:', action_RL)
                 else:
                     action_RL = self.policy_net.get_action(state, deterministic = self.deterministic)
-                    if self.CBF and len(targets) != 0:
-                        #To hold inside a target region:
-                        # if target_region_radius - np.sqrt((state[0] - target_region_center[0])**2 + (state[1] - target_region_center[1])**2) >= 0.0 and TCBF.CBF(state, remaining_t, u_agent_max, target_region_center, target_region_radius, u_target_max) < 2:
-                        #     for i in range(hold_time):#stay inside the target region for hold_time steps
-                        #         remaining_t = 1 #set it to 1 to stay inside the target region
-                        #         target_region_center = TCBF.moving_target(global_t, x0=initial_center[0], y0=initial_center[1], u_target_max= u_target_max, omega=omega)
-                        #         action = TCBF.solve_cbf_qp(TCBF.CBF, state, step, remaining_t, target_region_center, target_region_radius, omega, u_agent_max, u_target_max, action_RL)
-                        #         action = (action[0] + action_RL[0] , action[1] + action_RL[1]) #a_rl + a_cbf
-                        #         state, reward, done = self.env.step(action, target_region_center=target_region_center)
-                        #         step += 1
-                        #         global_t += 1 #increment global time step
-                        #     #target_reached = True
-                        #     print("Target region reached!")
 
+                    if self.CBF and len(targets) != 0: #If CBF is activated and there are still target regions remaining:
+                        #First, calculate the CBF value for each target region:
                         cbf_values = {}
                         for target_index in targets.keys():
                             cbf_value = sequential_CBF(state, u_agent_max, targets, target_index)
@@ -251,32 +270,122 @@ class SAC:
                 #print('Action:', action)
                 next_state, reward, done = self.env.step(action)
 
-                step += 1 #increment step counter
-                global_t += 1 #increment global time step
-
-                #decrease the remaining time and update the center for each target region
-                for target_index in list(targets.keys()):
-                    targets[target_index]['remaining_time'] -= 1
-
-                    #calculate the signed distance to each target region:
-                    target_center = targets[target_index]['center']
-                    target_radius = targets[target_index]['radius']
-                    dist = np.linalg.norm(state[:2] - target_center)
-                    signed_distance = dist - target_radius
-                    
-                    if signed_distance <= 0:
-                        targets.pop(target_index)  # Remove target region if the agent is inside it
-                        targets[target_index] = copy.deepcopy(initial_targets[target_index][1])  # add the target region back to the dictionary with the initial parameters
-
-
-                #print('reward;',reward)     
                 self.replay_buffer.push(state, action, reward, next_state, done)
                 
                 state = next_state
                 episode_reward += reward
+                
+                if self.CBF:
+                    #decrease the remaining time and update the center for each target region
+                    for target_index in list(targets.keys()):
+                        first_key = next(iter(targets))
+                        #print("Target index:", target_index, "Remaining time:", targets[target_index]['remaining_time'])
+                        targets[target_index]['remaining_time'] -= 1
+                        #targets[target_index]['center'] = moving_target(t, center_of_rotation, targets[target_index]['u_max'])
+                        task_type = targets[target_index]['type']
+                        time_window = targets[target_index]['time window']
+
+                        #calculate the signed distance to each target region:
+                        target_center = targets[target_index]['center']
+                        target_radius = targets[target_index]['radius']
+                        dist = np.linalg.norm(state[:2] - target_center)
+                        signed_distance = dist - target_radius
+
+                        remove_target = False #flag to indicate whether to remove the visited target region
+
+                        if task_type == "F":
+                            # Handle F type tasks
+                            a = time_window[0][0]
+                            b = time_window[0][1]
+                            if step >= a and step <= b and signed_distance <= 0:
+                                #within the time window
+                                remove_target = True
+                            else:
+                                continue #do not remove the target region if the agent is outside the time window
+
+                        elif task_type == "G":
+                            # Handle G type tasks
+                            a = time_window[0][0]
+                            b = time_window[0][1]
+                            if step == a and signed_distance <= 0:
+                                remove_target = True #remove the target region if the agent is inside it at the start of the time window
+                                #Hold inside the target region until the end of the time window:
+                                targets[target_index]['remaining_time'] = 0 #set the remaining time to the length of the time window
+                                for j in range(b-a):
+                                    print("Holding inside target region", targets[target_index]['id'], "at time", step)
+                                    step += 1
+                                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, step, targets, action_rl)
+
+                                    action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
+
+                                    next_state, reward, done = env.step(action) 
+
+                                    self.replay_buffer.push(state, action, reward, next_state, done)
+
+                                    state = next_state
+                                    episode_reward += reward          
+                            else:
+                                continue
+                        elif task_type == "FG":
+                            # Handle FG type tasks
+                            a = time_window[0][0]
+                            b = time_window[0][1]
+                            c = time_window[1][0]
+                            d = time_window[1][1]
+                            if step <= (a+c) and step >= (b+c) and signed_distance <= 0:
+                                #within the time window
+                                remove_target = True
+                                targets[target_index]['remaining_time'] = 0 #set the remaining time to the length of the time window
+                                for j in range(d-c):
+                                    print("Holding inside target region", targets[target_index]['id'], "at time", step)
+                                    step += 1
+                                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, step, targets, action_rl)
+
+                                    action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
+
+                                    next_state, reward, done = env.step(action)
+
+                                    self.replay_buffer.push(state, action, reward, next_state, done)
+
+                                    state = next_state
+                                    episode_reward += reward    
+                            else: continue
+
+                        elif task_type == "GF":
+                            # Handle GF type tasks
+                            a = time_window[0][0]
+                            b = time_window[0][1]
+                            c = time_window[1][0]
+                            d = time_window[1][1]
+                            if step >= a + c and step <= b + d and signed_distance <= 0 and first_key == target_index: #only remove the target region if it is the first in the sequence
+                                #within the time window
+                                remove_target = True
+                                ##################################################################################
+                                #UPDATE the remaining time for the next target region with the same id (if any):
+                                ##################################################################################
+                                keys = list(targets.keys())
+                                this_id = targets[target_index]['id']
+                                next_key = None
+                                i = keys.index(target_index)
+                                for kk in keys[i+1:]:              # look ahead
+                                    if targets[kk]['id'] == this_id:
+                                        next_key = kk              # found the next duplicate
+                                        break
+                                if next_key is not None:
+                                    targets[next_key]['remaining_time'] = d - c #set the next iteration's remaining time to the second time window's length
+                                    #print("Updated remaining time for target", targets[next_key]['id'], "to", targets[next_key]['remaining_time'])
+                            else: continue
+                        
+                        #remove the target if the conditions are satisfied:
+                        if remove_target:
+                            #print("Agent is inside target region:", targets[target_index]['id'])
+                            targets.pop(target_index)  # Remove target region if the agent is inside it
+
+
                 frame_idx += 1
-                
-                
+                step += 1 #increment step counter
+                global_t += 1 #increment global time step
+
                 if len(self.replay_buffer) > self.batch_size:
                     for i in range(self.n_updates_per_iteration):
                         _=self.update(self.batch_size, auto_entropy=self.auto_entropy, target_entropy = -1. * self.act_dim)
@@ -284,9 +393,9 @@ class SAC:
                 # if done: #terminate the episode if target region is reached
                 #     break
             
-
             if eps % 20 == 0 and eps>0: # plot and model saving interval
                     self.save_model()
+
 
             print('Episode: ', eps, '| Episode Reward: ', episode_reward)
             self.logger['eps_rewards'].append(episode_reward)

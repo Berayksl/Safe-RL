@@ -1,9 +1,11 @@
-#WITHOUT DIFFERENTIABLE SAFETY LAYER
+#WITHOUT DIFFERENTIABLE SAFETY LAYER 
+#Compatible with the task scheduler (created on 9/5/2025)
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from simulator import Continuous2DEnv
+from task_schedule_py3 import task_scheduler
 
 import sys
 import random
@@ -95,64 +97,57 @@ def test(env, hyperparameters, model_path, max_timesteps_per_episode):
 
 
 if __name__ == "__main__":
+	#########################################
+	#SCENARIO-1:
+	#########################################
+	t_windows=[[[0,300],[0,100]],[[0,300],[0,100]]] # STL time windows
+	subformula_types = np.array([4,4]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
+	agent_init_loc = np.array([0,0]) # Initial pos. (x,y) of the agent
+	roi = np.array([[-30, 30, 10],[-30, -30, 10]]) #3rd dimension is the radius
 
-	target_region_center = [-10, 2]
-	target_region_radius = 8
-	goal_region_radius = 10
-	action_range = [3, 3] #max vx and vy for RL actions
+	u_tar_max = np.array([.5, .5]) #max velocities of the targets
+	u_agent_max = 11 # Max vel. of the system
 	disturbance_interval = [-1, 1]
+	w_max = max(abs(disturbance_interval[0]), abs(disturbance_interval[1]))
+	u_agent_max = u_agent_max - w_max #reduce the max agent speed by the disturbance bound (worst-case)
 
-	u_target_max0 = 1.5
-	u_target_max1 = 1.5
-	u_agent_max = 9 #max agent speed
+	target_movements = {0: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (-25, 30)}, 1: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (0, -35)}, 2: {'type': 'static'}, 3: {'type': 'static'}} #movement patterns for each target region
+	#########################################
+	#END OF SCENARIO-1
+	#########################################
 
+	roi_disj = [] #np.copy(roi) # Create alternative RoI's (to be modified)
+	n_tar = len(roi) # of targets
+	disj_map = np.array([np.arange(0,n_tar)]) 
+	rois = [roi]
 
-	#CASE-1: Two targets moving in a periodic motion, one reward location
-	
-	targets = {
-	0: {'center': (-30, 30), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(-25,30)}, 'color': 'blue'}, #heading angle is in rad
-	1: {'center': (-30, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'circular', 'omega': -0.1, 'center_of_rotation':(-25,-30)}, 'color': 'red'}, #heading angle is in rad
-	2: {'center': (35, -30), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 200, 'movement':{'type': 'circular', 'omega': 0.1, 'center_of_rotation':(35,-30)}, 'color': 'yellow'}
-    }
+	target_colors = ['blue', 'red', 'green', 'black', 'yellow']
 
-	t1_p1 = (-30, 30)
-	t1_p2 = (30, 30)
-	t2_p1 = (30, -30)
-	t2_p2 = (-30, -30)
+	sequence, rem_time, rem_time_realistic, gamma, portions, portions0 = task_scheduler(rois,t_windows,subformula_types,agent_init_loc,u_agent_max,u_tar_max)
 
+	task_stypes = ["F", "G", "FG", "GF"]
+    #create the target dictionary:
+	targets = {}
+	for i, target_id in enumerate(sequence):
+		targets[i] = {
+            'id': target_id,
+            'type': task_stypes[subformula_types[target_id]-1],
+            'time window': t_windows[target_id],
+            'center': roi[target_id][:2],
+            'radius': roi[target_id][2],
+            'u_max': u_tar_max[target_id],
+            'remaining_time': rem_time_realistic[i],
+            'movement': target_movements[target_id],
+            'color': target_colors[target_id]
+        }
 
-	# targets = {
-	# 0: {'center': (-40, 40), 'radius': target_region_radius, 'u_max': u_target_max0, 'remaining_time': 100, 'movement':{'type': 'periodic', 'point1': t1_p1, 'point2': t1_p2, 'heading_angle': np.arctan2(t1_p2[1] - t1_p1[1], t1_p2[0] - t1_p1[0])}, 'color': 'blue'}, #heading angle is in rad
-	# 1: {'center': (-40, -40), 'radius': target_region_radius, 'u_max': u_target_max1, 'remaining_time': 100, 'movement':{'type': 'periodic', 'point1': t2_p1, 'point2': t2_p2, 'heading_angle': np.arctan2(t2_p2[1] - t2_p1[1], t2_p2[0] - t2_p1[0])}, 'color': 'red'}, #heading angle is in rad
-	# #2: {'center': (-20, -20), 'radius': target_region_radius, 'u_max': 0.05	, 'remaining_time': 200, 'movement':{'type': 'straight', 'heading_angle': 5*np.pi/4}, 'color': 'green'}
-    # }
 
 	#Static goal region:
-
+	goal_region_radius = 10
 	goals = {
 	0: {'center': (50, 0), 'radius': goal_region_radius, 'movement':{'type':'static'}}, #goal region for the agent
 	#1: {'center': (-50, 0), 'radius': 10, 'movement':{'type':'static'}}
 	}
-
-	# #Periodic goal region:
-	# g1_p1 = (50, 0)
-	# g1_p2 = (50, 20)
-
-
-	# goals = {
-	# 0: {'center': (50, 0), 'radius': 10, 'u_max': 0.5, 'movement':{'type':'periodic', 'point1': g1_p1, 'point2': g1_p2, 'heading_angle': np.arctan2(g1_p2[1] - g1_p1[1], g1_p2[0] - g1_p1[0])}}, #goal region for the agent
-	# }
-
-	# #Blinking goal region:
-	# g1_p1 = (50, -35) #point1 of the blinking goal region
-	# g1_p2 = (50, 35) #point2 of the blinking goal region
-
-	# goals = {
-	# 0: {'center': (20, 13), 'radius': 10, 'movement':{'type':'blinking', 'point1': g1_p1, 'point2': g1_p2, 'blink_duration': 50, 'heading_angle': np.arctan2(g1_p2[1] - g1_p1[1], g1_p2[0] - g1_p1[0])}}, #goal region for the agent
-	# }
-
-
-	#targets = {} #CHANGE LATER!!!!!!!!!
 
     #config dictionary for the environment
 	config = {
@@ -177,14 +172,13 @@ if __name__ == "__main__":
 
 	
 	CBF_parameters = {
-		"target_region_center": target_region_center,
-        "target_region_radius": target_region_radius,
 		'epsilon' : 0.5, #for reference point,
 		'alpha': 1.5, #weight for the CBF term
 		"u_agent_max": u_agent_max, #max agent speed
 		"targets": targets
     }
 
+	action_range = [3, 3]
 
 	#learning hyperparameters:
 	hyperparameters = {
@@ -194,13 +188,13 @@ if __name__ == "__main__":
 				'buffer_size': int(1e6),
 				'batch_size': 256,
 				'max_timesteps_per_episode': 300, 
-				'num_episodes': 100,
+				'num_episodes': 60,
 				'n_updates_per_iteration': 1,
 				'deterministic': False,
 				'auto_entropy':True,
 				'action_range': action_range,
 				'action_clip' : True,
-				'CBF': True,
+				'CBF': False,
 				'CBF_params': CBF_parameters,
 				'online': False,
 				'disturbance': disturbance_interval
@@ -219,7 +213,7 @@ if __name__ == "__main__":
 		config['render'] = True #enable rendering for testing
 		config['dt_render'] = 0.03
 		config['init_loc'] = [0.0, -1]
-		config['randomize_loc'] = True #randomize the agent location at the end of each episode
+		config['randomize_loc'] = False #randomize the agent location at the end of each episode
 		env = Continuous2DEnv(config)
 		max_timesteps_per_episode = hyperparameters['max_timesteps_per_episode']
 		# Load in the model file

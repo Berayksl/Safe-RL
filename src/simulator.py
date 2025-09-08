@@ -4,7 +4,7 @@ import matplotlib.animation as animation
 import time
 
 from dynamics import UnicycleDynamics, SingleIntegratorDynamics
-from Sequential_CBF import sequential_CBF
+#from Sequential_CBF import sequential_CBF
 
 class Continuous2DEnv:
     def __init__(self, config):
@@ -27,6 +27,13 @@ class Continuous2DEnv:
         self.action_min = config.get("action_min")
         self.dynamics = config.get("dynamics", "unicycle")
         self.u_agent_max = config.get("u_agent_max", None)  # max agent speed
+
+        if config.get("disturbance") is not None: #min and max disturbance:
+            self.disturbance = True
+            self.w_min = config.get("disturbance")[0] 
+            self.w_max = config.get("disturbance")[1]
+        else:
+            self.disturbance = False
 
         self.initial_target_centers = {target_index: self.targets[target_index]['center'] for target_index in self.targets.keys()}
         self.simulation_timer = 0
@@ -126,17 +133,15 @@ class Continuous2DEnv:
     def reset(self):
         """Resets the environment."""
         if self.random_loc:
-            x = np.random.uniform(0, self.width)
-            y = np.random.uniform(0, self.height)
-            theta = self.init_loc[2] + np.random.uniform(-np.pi, np.pi)
-            # Ensure the agent starts within the safe region
-            while np.linalg.norm(np.array([x, y]) - self.safe_region_center) >= self.safe_region_radius:
-                x = np.random.uniform(0, self.width)
-                y = np.random.uniform(0, self.height)
+            x = np.random.uniform(-self.width, self.width)
+            y = np.random.uniform(-self.height, self.height)
+            if self.dynamics == 'unicycle':
                 theta = self.init_loc[2] + np.random.uniform(-np.pi, np.pi)
-                # Ensure the agent starts within the safe region
-                if np.linalg.norm(np.array([x, y]) - self.safe_region_center) < self.safe_region_radius:
-                    break
+                self.agent = UnicycleDynamics(x=x, y=y, theta=theta, dt=self.dt)
+                state = np.array([self.agent.x, self.agent.y, self.agent.theta])
+            elif self.dynamics == 'single integrator':
+                self.agent = SingleIntegratorDynamics(x=x, y=y, dt=self.dt)
+                state = np.array([self.agent.x, self.agent.y])
         else:
             if self.dynamics == 'unicycle':
                 x = self.init_loc[0]
@@ -172,17 +177,17 @@ class Continuous2DEnv:
     
 
 
-    def compute_reward(self): #updated to include multiple targets
+    def compute_reward(self): #updated to include multiple goals
         pos = np.array([self.agent.x, self.agent.y])
-        # List of distances to all target centers
-        dists = [np.linalg.norm(pos - np.array(t['center'])) for t in self.goals.values()]
+        # List of distances to all goal centers
+        dists = [np.linalg.norm(pos - np.array(g['center'])) for g in self.goals.values()]
         dist_min = min(dists)
         
-        reward = -dist_min  # Dense part: encourages reaching nearest target
+        reward = -dist_min  # Dense part: encourages reaching nearest goal
         
-        # Sparse bonus if agent enters any target region
-        for t in self.targets.values():
-            if dist_min <= t['radius']:
+        # Sparse bonus if agent enters any goal region
+        for goal in self.goals.values():
+            if dist_min <= goal['radius']:
                 reward += 100
                 break
         
@@ -195,6 +200,11 @@ class Continuous2DEnv:
         :return: next_state, reward, done
         """
         #make the updates:
+        if self.disturbance:
+            w = np.random.uniform(self.w_min, self.w_max, size=2) #sample noise
+            action = action + w #add noise to the action
+            #print(action)
+
         state = self.agent.update(action) #update the agent state
         #update the target region states:
         for target_index in self.targets.keys():
@@ -253,12 +263,26 @@ class Continuous2DEnv:
         # Update targets' positions
         for patch in self.target_region_patches:
             patch.remove()  # remove old
+            
+        for label in getattr(self, "target_labels", []):
+            label.remove()
 
         self.target_region_patches = []
-        for target_id, target_info in self.targets.items():
+        self.target_labels = []
+        for i, target_info in self.targets.items():
             patch = plt.Circle(target_info["center"], target_info["radius"], color=target_info['color'], fill=False, linestyle='-')
             self.ax.add_patch(patch)
             self.target_region_patches.append(patch)
+
+            cx, cy = target_info["center"]
+            target_id = target_info['id']
+            label = self.ax.text(
+                cx, cy, str(target_id),
+                ha='center', va='center',
+                fontsize=10, color=target_info['color'],
+                weight='bold'
+            )
+            self.target_labels.append(label)
 
 
         # Update goals' positions
@@ -313,10 +337,13 @@ class Continuous2DEnv:
             if movement_type == 'circular':
                 x0, y0 = self.initial_target_centers[target_id]
                 u_target_max = self.targets[target_id]['u_max']
-                omega = self.targets[target_id]['movement']['omega']
+                #omega = self.targets[target_id]['movement']['omega']
                 xc, yc = self.targets[target_id]['movement']['center_of_rotation']
                  # Calculate the initial angle from the center of rotation to the initial position
                 theta0 = np.arctan2(y0 - yc, x0 - xc)
+
+                turning_radius = np.linalg.norm(np.array([x0 - xc, y0 - yc]))
+                omega = u_target_max / turning_radius #angular velocity
                 
                 # Calculate the new angle after time_elapsed
                 theta = theta0 + omega * current_t
@@ -324,7 +351,21 @@ class Continuous2DEnv:
 
                 x_new = xc + turning_radius * np.cos(theta)
                 y_new = yc + turning_radius * np.sin(theta)
-            
+            # if movement_type == 'circular':
+            #     x0, y0 = self.initial_target_centers[target_id]
+            #     u_target_max = self.targets[target_id]['u_max']
+            #     omega = self.targets[target_id]['movement']['omega']
+               
+            #      # Calculate the initial angle from the center of rotation to the initial position
+
+            #     turning_radius = u_target_max / omega
+
+            #     # Calculate the new angle after time_elapsed
+            #     theta = theta0 + omega * current_t
+            #     turning_radius = u_target_max / omega
+
+            #     x_new = xc + turning_radius * np.cos(theta)
+            #     y_new = yc + turning_radius * np.sin(theta)
             elif movement_type == 'straight':
                 x0, y0 = self.initial_target_centers[target_id]
                 heading_angle = self.targets[target_id]['movement']['heading_angle']
@@ -429,22 +470,53 @@ class Continuous2DEnv:
         return (x_new, y_new)
     
 
+    def set_agent_location(self, x, y, theta=None):
+        """
+        Sets the agent's location to the specified coordinates manually.
+        :param x: x-coordinate of the agent.
+        :param y: y-coordinate of the agent.
+        :param theta: orientation angle (only for unicycle dynamics).
+        """
+        if self.dynamics == 'unicycle':
+            self.agent = UnicycleDynamics(x=x, y=y, theta=theta, dt=self.dt)
+            return np.array([self.agent.x, self.agent.y, self.agent.theta])
+        elif self.dynamics == 'single integrator':
+            self.agent = SingleIntegratorDynamics(x=x, y=y, dt=self.dt)
+            return np.array([self.agent.x, self.agent.y])
+        
 if __name__ == "__main__":
+
+    target_region_center = [-10, 2]
+    target_region_radius = 8
+    action_range = [3, 3] #max vx and vy (for single integrator dynamics)
+
+    u_target_max0 = 1.5
+    u_target_max1 = 1.5
+    u_agent_max = 8 #max agent speed
+
+    goals = {0: {'center': (50, 0), 'radius': 10, 'movement':{'type':'static'}}, #goal region for the agent
+	#1: {'center': (-50, 0), 'radius': 10, 'movement':{'type':'static'}}
+    }
+
+    targets = {}
     #config dictionary for the environment
     config = {
-        'init_loc': [0.0, 0.0, 0.0], #initial location of the agent
-        "width": 10.0,
-        "height": 10.0,
-        "dt": 0.1,
+        'init_loc':[-20, -20], #initial location of the agent (x, y)
+        "width": 100.0,
+        "height": 100.0,
+        "dt": 1,
         "render": True,
-        'dt_render': 0.1,
-        "goal_location": [8.0, 8.0],
-        "goal_size": 0.5,
-        "obstacle_location": [4.0, 4.0],
-        "obstacle_size": 0.5,
-        "safe_region_center": [0.0, 0.0],
-        "safe_region_radius": 3.0,
-        "randomize_loc": True #whether to randomize the agent location at the end of each episode
+		'dt_render': 0.03,
+		'goals': goals, #goal regions for the agent
+        "obstacle_location": [100.0, 100.0],
+        "obstacle_size": 0.0,
+        "randomize_loc": False, #whether to randomize the agent location at the end of each episode
+		'deterministic': False,
+		'auto_entropy':True,
+		"dynamics": "single integrator", #dynamics model to use
+		"targets": targets,
+		"u_agent_max": u_agent_max, #max target speed
+		"disturbance": [-0.5, 0.5] #disturbance range in both x and y directions [w_min, w_max]
     }
 
     env = Continuous2DEnv(config)
@@ -456,8 +528,8 @@ if __name__ == "__main__":
         state, reward, done = env.step(action)
 
         #print("State:", state)
-        if done:
-            break
+        # if done:
+        #     break
 
         #state = env.reset()
 
