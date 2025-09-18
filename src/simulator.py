@@ -26,7 +26,7 @@ class Continuous2DEnv:
         self.action_max = config.get("action_max")
         self.action_min = config.get("action_min")
         self.dynamics = config.get("dynamics", "unicycle")
-        self.u_agent_max = config.get("u_agent_max", None)  # max agent speed
+        #self.u_agent_max = config.get("u_agent_max", None)  # max agent speed
 
         if config.get("disturbance") is not None: #min and max disturbance:
             self.disturbance = True
@@ -52,9 +52,25 @@ class Continuous2DEnv:
 
         if self.render:
             self.fig, self.ax = plt.subplots()
+
+            # --- set window location/size (pixels), backend-safe ---
+            mng = plt.get_current_fig_manager()
+            try:
+                # TkAgg backend
+                mng.window.wm_geometry("900x650+120+80")  # WxH+X+Y
+            except Exception:
+                try:
+                    print('here')
+                    # Qt backend
+                    # setGeometry(x, y, width, height)
+                    mng.window.setGeometry(120, 80, 1500, 1500)
+                except Exception:
+                    pass  # other backends may not support moving the window
+
+
             self.ax.set_xlim(-self.width, self.width)
             self.ax.set_ylim(-self.height, self.height)
-            self.agent_plot, = self.ax.plot([], [], 'ro', label='Agent')
+            self.agent_plot, = self.ax.plot([], [], 'ro', label='Agent', markersize=10)
 
             self.goal_plots = []
             for goal in self.goals.values():
@@ -68,7 +84,10 @@ class Continuous2DEnv:
             self.safe_region_plots = []
             self.target_region_patches = []
             self.ax.add_patch(self.obstacle_plot)
-            self.ax.legend()
+            # self.ax.legend()
+            #remove the axis ticks:
+            self.ax.set_xticks([])
+            self.ax.set_yticks([])
             #self.ani = animation.FuncAnimation(self.fig, self.update_animation, interval=10, cache_frame_data=False)
             self.fig.show()
             self.fig.canvas.draw()
@@ -135,6 +154,16 @@ class Continuous2DEnv:
         if self.random_loc:
             x = np.random.uniform(-self.width, self.width)
             y = np.random.uniform(-self.height, self.height)
+            #resample if inside the goal:
+            goal_centers = [goal['center'] for goal in self.goals.values()]
+            goal_radii = [goal['radius'] for goal in self.goals.values()]
+            for center, radius in zip(goal_centers, goal_radii):
+                dist_to_goal = np.linalg.norm(np.array([x, y]) - np.array(center))
+                while dist_to_goal <= radius + 2: #add a small buffer
+                    x = np.random.uniform(-self.width, self.width)
+                    y = np.random.uniform(-self.height, self.height)
+                    dist_to_goal = np.linalg.norm(np.array([x, y]) - np.array(center))
+
             if self.dynamics == 'unicycle':
                 theta = self.init_loc[2] + np.random.uniform(-np.pi, np.pi)
                 self.agent = UnicycleDynamics(x=x, y=y, theta=theta, dt=self.dt)
@@ -275,9 +304,9 @@ class Continuous2DEnv:
             self.target_region_patches.append(patch)
 
             cx, cy = target_info["center"]
-            target_id = target_info['id']
+            target_label = target_info['label']
             label = self.ax.text(
-                cx, cy, str(target_id),
+                cx, cy, str(target_label),
                 ha='center', va='center',
                 fontsize=10, color=target_info['color'],
                 weight='bold'
@@ -334,38 +363,56 @@ class Continuous2DEnv:
         if self.targets is not None:
             movement_type = self.targets[target_id]['movement']['type']
             #TODO: add more movement types
-            if movement_type == 'circular':
-                x0, y0 = self.initial_target_centers[target_id]
-                u_target_max = self.targets[target_id]['u_max']
-                #omega = self.targets[target_id]['movement']['omega']
-                xc, yc = self.targets[target_id]['movement']['center_of_rotation']
-                 # Calculate the initial angle from the center of rotation to the initial position
-                theta0 = np.arctan2(y0 - yc, x0 - xc)
-
-                turning_radius = np.linalg.norm(np.array([x0 - xc, y0 - yc]))
-                omega = u_target_max / turning_radius #angular velocity
-                
-                # Calculate the new angle after time_elapsed
-                theta = theta0 + omega * current_t
-                turning_radius = u_target_max / omega
-
-                x_new = xc + turning_radius * np.cos(theta)
-                y_new = yc + turning_radius * np.sin(theta)
             # if movement_type == 'circular':
             #     x0, y0 = self.initial_target_centers[target_id]
             #     u_target_max = self.targets[target_id]['u_max']
-            #     omega = self.targets[target_id]['movement']['omega']
-               
+            #     #omega = self.targets[target_id]['movement']['omega']
+            #     xc, yc = self.targets[target_id]['movement']['center_of_rotation']
             #      # Calculate the initial angle from the center of rotation to the initial position
+            #     theta0 = np.arctan2(y0 - yc, x0 - xc)
 
-            #     turning_radius = u_target_max / omega
-
+            #     turning_radius = np.linalg.norm(np.array([x0 - xc, y0 - yc]))
+            #     omega = u_target_max / turning_radius #angular velocity
+                
             #     # Calculate the new angle after time_elapsed
             #     theta = theta0 + omega * current_t
             #     turning_radius = u_target_max / omega
 
             #     x_new = xc + turning_radius * np.cos(theta)
             #     y_new = yc + turning_radius * np.sin(theta)
+            if movement_type == 'circular':
+                x0, y0 = self.initial_target_centers[target_id]
+                u_target_max = self.targets[target_id]['u_max']
+                x, y = self.targets[target_id]['center'] #current position
+                xc, yc = self.targets[target_id]['movement']['center_of_rotation']
+
+                if 'theta' not in self.targets[target_id]['movement']:
+                    theta = np.arctan2(y0 - yc, x0 - xc) #initial angle
+                else:
+                    theta = self.targets[target_id]['movement']['theta']
+
+                turning_radius = np.linalg.norm(np.array([x0 - xc, y0 - yc]))
+                omega = u_target_max / turning_radius #angular velocity
+                
+                # Calculate the new angle after time_elapsed
+                theta += omega * self.dt
+                turning_radius = u_target_max / omega
+
+                x_new = xc + turning_radius * np.cos(theta)
+                y_new = yc + turning_radius * np.sin(theta)
+
+                #stop if hit another target:
+                for other_id, other_info in self.targets.items():
+                    if other_id != target_id:
+                        other_center = np.array(other_info['center'])
+                        dist = np.linalg.norm(np.array([x_new, y_new]) - other_center)
+                        if dist < (self.targets[target_id]['radius'] + other_info['radius']):
+                            x_new, y_new = self.targets[target_id]['center'] #stay at the current position
+                            theta -= omega * self.dt #stay at the current angle
+
+                # Update theta in targets dictionary
+                self.targets[target_id]['movement']['theta'] = theta
+
             elif movement_type == 'straight':
                 x0, y0 = self.initial_target_centers[target_id]
                 heading_angle = self.targets[target_id]['movement']['heading_angle']
@@ -406,10 +453,117 @@ class Continuous2DEnv:
 
                 heading_angle = np.arctan2(direction_vector[1], direction_vector[0])
 
+                # #stop if hit another target:
+                # for other_id, other_info in self.targets.items():
+                #     if other_id != target_id:
+                #         other_center = np.array(other_info['center'])
+                #         dist = np.linalg.norm(np.array([x_new, y_new]) - other_center)
+                #         if dist < (self.targets[target_id]['radius'] + other_info['radius']):
+                #             x_new, y_new = self.targets[target_id]['center'] #stay at the current position
 
                 # Update heading angle in targets dictionary
                 self.targets[target_id]['movement']['heading_angle'] = heading_angle
 
+            # elif movement_type == 'random_walk':
+            #     if self.simulation_timer % 30 == 0: #change direction every 30 time steps
+            #         heading_angle = np.random.uniform(0, 2 * np.pi)
+            #         self.targets[target_id]['movement']['heading_angle'] = heading_angle
+            #     else:
+            #         heading_angle = self.targets[target_id]['movement']['heading_angle']
+
+            #     x, y = self.targets[target_id]['center']
+            #     u_target_max = self.targets[target_id]['u_max']
+
+            #     # Update target position based on heading angle and max speed
+            #     x_new = x + u_target_max/2 * np.cos(heading_angle) * self.dt
+            #     y_new = y + u_target_max/2 * np.sin(heading_angle) * self.dt
+            #     # Boundary handling (reflective)
+            #     if x_new < -self.width or x_new > self.width:
+            #         heading_angle = np.pi - heading_angle
+            #         x_new = np.clip(x_new, -self.width, self.width)
+            #         self.targets[target_id]['movement']['heading_angle'] = heading_angle
+            #     if y_new < -self.height or y_new > self.height:
+            #         heading_angle = -heading_angle
+            #         y_new = np.clip(y_new, -self.height, self.height)
+            #         self.targets[target_id]['movement']['heading_angle'] = heading_angle
+
+            #     #bounce from other targets:
+            #     for other_id, other_info in self.targets.items():
+            #         if other_id != target_id:
+            #             other_center = np.array(other_info['center'])
+            #             dist = np.linalg.norm(np.array([x_new, y_new]) - other_center)
+            #             if dist < (self.targets[target_id]['radius'] + other_info['radius'] + 1):
+            #                 #simple reflection:
+            #                 heading_angle += np.pi/2
+            #                 x_new = x + u_target_max * np.cos(heading_angle) * self.dt
+            #                 y_new = y + u_target_max * np.sin(heading_angle) * self.dt
+            #                 self.targets[target_id]['movement']['heading_angle'] = heading_angle
+            elif movement_type == 'random_walk':
+                # 0) keep your random re-heading
+                if self.simulation_timer % 50 == 0:
+                    heading_angle = np.random.uniform(0, 2*np.pi)
+                    self.targets[target_id]['movement']['heading_angle'] = heading_angle
+                else:
+                    heading_angle = self.targets[target_id]['movement']['heading_angle']
+
+                # 1) base velocity
+                speed = self.targets[target_id]['u_max'] * 0.5
+                v = np.array([np.cos(heading_angle), np.sin(heading_angle)]) * speed
+
+                # 2) super-light separation from neighbors
+                AVOID_RADIUS = 2.0   # start with 2–3; tune
+                AVOID_GAIN   = 0.8   # 0.5–1.0 is typical
+                p = np.array(self.targets[target_id]['center'], dtype=float)
+                r_self = self.targets[target_id]['radius']
+
+                rep = np.zeros(2, float)
+                for oid, o in self.targets.items():
+                    if oid == target_id:
+                        continue
+                    po = np.array(o['center'], dtype=float)
+                    ro = o['radius']
+                    delta = p - po
+                    d = np.linalg.norm(delta)
+                    R = r_self + ro + AVOID_RADIUS
+                    if d < R and d > 1e-6:
+                        rep += (delta / d) * (R - d) / R   # push straight away
+
+                # apply small push, keep speed ~constant
+                v = v + AVOID_GAIN * rep
+                n = np.linalg.norm(v)
+                #if n > 1e-6:
+                    #v = v / n * speed
+                heading_angle = float(np.arctan2(v[1], v[0]))
+
+                # 3) integrate
+                p_new = p + v * self.dt
+
+                # 4) simple wall bounce
+                if p_new[0] < -self.width or p_new[0] > self.width:
+                    heading_angle = np.pi - heading_angle
+                    v = np.array([np.cos(heading_angle), np.sin(heading_angle)]) * speed
+                    p_new[0] = np.clip(p_new[0], -self.width, self.width)
+
+                if p_new[1] < -self.height or p_new[1] > self.height:
+                    heading_angle = -heading_angle
+                    v = np.array([np.cos(heading_angle), np.sin(heading_angle)]) * speed
+                    p_new[1] = np.clip(p_new[1], -self.height, self.height)
+
+                # 5) last-resort bounce if still overlapping
+                for oid, o in self.targets.items():
+                    if oid == target_id:
+                        continue
+                    po = np.array(o['center'], float)
+                    R = r_self + o['radius']
+                    if np.linalg.norm(p_new - po) < R:
+                        heading_angle += np.pi  # flip 180°
+                        v = np.array([np.cos(heading_angle), np.sin(heading_angle)]) * speed
+                        p_new = p + v * self.dt
+                        break
+
+                # 6) commit
+                x_new, y_new = p_new.tolist()
+                self.targets[target_id]['movement']['heading_angle'] = heading_angle
 
         return (x_new, y_new)
 

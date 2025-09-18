@@ -64,10 +64,13 @@ def sequential_CBF(agent_state, u_agent_max, targets, target_index): #returns th
 
 
 
-def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targets, u_rl):
+def solve_cbf_qp(b_func, agent_state, u_agent_max, disturbance_interval, target_index, current_t, targets, u_rl):
     """
     Solve QP to get control u satisfying the CBF condition.
     """
+    w_max = max(abs(disturbance_interval[0]), abs(disturbance_interval[1]))
+    u_agent_max_cbf = u_agent_max - w_max #reduce the max agent speed by the disturbance bound (worst-case)
+
     x = agent_state
     u = cp.Variable(2)
     delta = cp.Variable(nonneg=True) #slack variable for the CBF condition
@@ -80,7 +83,7 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
     dy = x[1] - first_target_center[1]
     dist = max(np.sqrt(dx**2 + dy**2), 1e-6)
 
-    db_dx = -1 * np.array([dx / dist, dy / dist]) * (1 / u_agent_max) #derivative w.r.t. the agent's state
+    db_dx = -1 * np.array([dx / dist, dy / dist]) * (1 / u_agent_max_cbf) #derivative w.r.t. the agent's state
 
     target_center, target_radius, u_target_max, remaining_t, _ = targets[target_index]['center'], targets[target_index]["radius"], targets[target_index]['u_max'], targets[target_index]['remaining_time'], targets[target_index]['movement']['type']
 
@@ -102,22 +105,22 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
                 dx_prev = target_1['center'][0] - target_2['center'][0]
                 dy_prev = target_1['center'][1] - target_2['center'][1]
                 dist_prev = np.sqrt(dx_prev**2 + dy_prev**2)
-                temp = np.array([dx_prev / dist_prev, dy_prev / dist_prev]) * (1 / u_agent_max)
+                temp = np.array([dx_prev / dist_prev, dy_prev / dist_prev]) * (1 / u_agent_max_cbf)
 
                 dx_next = target_2['center'][0] - target_3['center'][0]
                 dy_next = target_2['center'][1] - target_3['center'][1]
                 dist_next = np.sqrt(dx_next**2 + dy_next**2)
-                temp += np.array([dx_next / dist_next, dy_next / dist_next]) * (1 / u_agent_max)
+                temp += np.array([dx_next / dist_next, dy_next / dist_next]) * (1 / u_agent_max_cbf)
 
-                db_dr[l] = 1 - 2* (targets[target_indexes[l]]['u_max']/ u_agent_max)
+                db_dr[l] = 1 - 2* (targets[target_indexes[l]]['u_max']/ u_agent_max_cbf)
 
             else:
                 dx_prev = target_1['center'][0] - target_2['center'][0]
                 dy_prev = target_1['center'][1] - target_2['center'][1]
                 dist_prev = np.sqrt(dx_prev**2 + dy_prev**2)
-                temp = np.array([dx_prev / dist_prev, dy_prev / dist_prev]) * (1 / u_agent_max)
+                temp = np.array([dx_prev / dist_prev, dy_prev / dist_prev]) * (1 / u_agent_max_cbf)
                 
-                db_dr[l] = 1 - (targets[target_indexes[l]]['u_max'] / u_agent_max)  # derivative w.r.t. the remaining time for the target
+                db_dr[l] = 1 - (targets[target_indexes[l]]['u_max'] / u_agent_max_cbf)  # derivative w.r.t. the remaining time for the target
 
             db_dx_target[l] = temp
             l += 1
@@ -128,23 +131,23 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
         dx_next = target_1['center'][0] - target_2['center'][0]
         dy_next = target_1['center'][1] - target_2['center'][1]
         dist_next = np.sqrt(dx_next**2 + dy_next**2)
-        db_dx_target[0] = np.array([dx_next / dist_next, dy_next / dist_next]) * (1 / u_agent_max) + np.array([dx / dist, dy / dist]) * (1 / u_agent_max)# derivative w.r.t. the first target's state
-        db_dr[0] = 1 - 2 * (u_target_max_first / u_agent_max)  # derivative w.r.t. the remaining time for the first target
+        db_dx_target[0] = np.array([dx_next / dist_next, dy_next / dist_next]) * (1 / u_agent_max_cbf) + np.array([dx / dist, dy / dist]) * (1 / u_agent_max_cbf)# derivative w.r.t. the first target's state
+        db_dr[0] = 1 - 2 * (u_target_max_first / u_agent_max_cbf)  # derivative w.r.t. the remaining time for the first target
     else:
-        db_dx_target[0] = np.array([dx / dist, dy / dist]) * (1 / u_agent_max)
-        db_dr[0] = 1 - (u_target_max_first / u_agent_max)  # derivative w.r.t. the remaining time for the first target
+        db_dx_target[0] = np.array([dx / dist, dy / dist]) * (1 / u_agent_max_cbf)
+        db_dr[0] = 1 - (u_target_max_first / u_agent_max_cbf)  # derivative w.r.t. the remaining time for the first target
 
     #print('db_dx_target:', db_dx_target)
     #print('db_dr:', db_dr)
 
-    alpha_min = 0.6  # never zero
-    alpha_max = 1.5
-    d_max = 20.0  # beyond this distance, alpha is at max value
-    alpha = alpha_min + (alpha_max - alpha_min) * min(dist / d_max, 1.0)
+    # alpha_min = 0.6  # never zero
+    # alpha_max = 1.5
+    # d_max = 20.0  # beyond this distance, alpha is at max value
+    # alpha = alpha_min + (alpha_max - alpha_min) * min(dist / d_max, 1.0)
 
     # print('alpha:', alpha)
 
-    #alpha = 1.5
+    alpha = 1.5
 
     u_min = np.array([-u_agent_max, -u_agent_max])
     u_max = np.array([u_agent_max, u_agent_max])  # might need to change later!
@@ -173,7 +176,7 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
 
     #print(db_dx @ (u + u_rl) + db_dx_target @ u_target - db_dr + alpha * b_func(agent_state, u_agent_max, targets, target_index))
 
-    cbf_constraint = [db_dx @ (u + u_rl) + np.transpose(db_dx_target) @ u_target - np.transpose(db_dr) @ np.ones(len(targets)) + alpha * b_func(agent_state, u_agent_max, targets, target_index) + delta >= 0, #CBF condition
+    cbf_constraint = [db_dx @ (u + u_rl) + np.transpose(db_dx_target) @ u_target - np.transpose(db_dr) @ np.ones(len(targets)) + alpha * b_func(agent_state, u_agent_max_cbf, targets, target_index) + delta >= 0, #CBF condition
         #control input constraints:
         u + u_rl >= u_min,
         u + u_rl <= u_max
@@ -220,13 +223,17 @@ if __name__ == "__main__":
 
 
     # #scenario-2:
-    # t_windows=[[[0,20]],[[0,20]],[[33,36]],[[0,20],[0,10]]] # STL time windows
+    # t_windows=[[[0,20]],[[0,20]],[[33,36]],[[0,20],[0,5]]] # STL time windows
     # subformula_types = np.array([1,1,2,4]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
     # agent_init_loc = np.array([0,0]) # Initial pos. (x,y) of the agent
     # u_tar_max = .1*np.array([.6, .6, .4, .5, .55])
 
     # roi=np.array([[-30, 30, 10],[0,-30, 10],[-30, -30, 10],[10, 20, 10]])
-    # target_movements = {0: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (-25, 30)}, 1: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (0, -35)}, 2: {'type': 'static'}, 3: {'type': 'static'}} #movement patterns for each target region
+
+    # point1 = (-30, -30)
+    # point2 = (-30, 30)
+
+    # target_movements = {0: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (-25, 30)}, 1: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (0, -35)}, 2: {'type': 'periodic', 'point1': point1, 'point2': point2, 'heading_angle': np.arctan2(point2[1] - point1[1], point2[0] - point1[0])}, 3: {'type': "static"}} #movement patterns for each target region
 
     # u_agent_max = 11 # Max vel. of the system
     # disturbance_interval = [-1, 1]
@@ -239,28 +246,80 @@ if __name__ == "__main__":
     # disj_map = np.array([np.arange(0,n_tar)]) 
     # rois = [roi]
 
-    #scenario-3: #1 task with an alternative
-    t_windows=[[[0,20]],[[0,20]],[[33,36]],[[0,20],[0,10]]] # STL time windows
-    subformula_types = np.array([1,1,2,4]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
-    agent_init_loc = np.array([0,0]) # Initial pos. (x,y) of the agent
-    u_tar_max = 0.1*np.array([.6, .6, .4, .5, .55])
+    # #scenario-3: #1 task with an alternative
+    # t_windows=[[[0,20]],[[0,20]],[[33,36]],[[0,20],[0,10]]] # STL time windows
+    # subformula_types = np.array([1,1,2,4]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
+    # agent_init_loc = np.array([0,0]) # Initial pos. (x,y) of the agent
+    # u_tar_max = 0.1*np.array([.6, .6, .4, .5, .55])
 
-    roi=np.array([[-60, -30, 10],[0,-30, 10],[-30, -30, 10],[10, 20, 10]])
-    target_movements = {0: {'type': 'circular', 'center_of_rotation': (-25, -30)}, 1: {'type': 'circular', 'center_of_rotation': (0, -35)}, 2: {'type': 'static'}, 3: {'type': 'static'}} #movement patterns for each target region
+    # roi=np.array([[-60, -30, 10],[0,-30, 10],[-30, -30, 10],[10, 20, 10]])
+    # target_movements = {0: {'type': 'circular', 'center_of_rotation': (-25, -30)}, 1: {'type': 'circular', 'center_of_rotation': (0, -35)}, 2: {'type': 'static'}, 3: {'type': 'static'}} #movement patterns for each target region
     
+    # u_agent_max = 11 # Max vel. of the system
+    # disturbance_interval = [-1, 1]
+    # w_max = max(abs(disturbance_interval[0]), abs(disturbance_interval[1]))
+    # u_agent_max = u_agent_max - w_max #reduce the max agent speed by the disturbance bound (worst-case)
+
+    # roi_disj = np.copy(roi) # Create alternative RoI's (to be modified)
+    # n_tar = np.size(roi,0) # of targets
+    # alt_inds=np.zeros(n_tar) # Tasks with an alternative will be nonzero only
+    # alt_inds[0]=1
+    # roi_disj[alt_inds>0]=np.array([[-30,30,10]]) # Alternative target to 1st task
+    # alt_movements = {0: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (-25, 30)}}
+    # #disj_map = np.array([np.arange(0,n_tar),np.array([0,0,0,5,0])])
+    # rois = [roi,roi_disj] # Create alternative full-RoI lists
+
+    # #scenario-4:(not working)
+    # t_windows=[[[0,200],[0,90]],[[0,200],[50,60]],[[0,200],[100,110]]] # STL time windows
+    # subformula_types = np.array([4,3,3]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
+    # #t_windows=[[[0,200],[0,90]],[[20,30]],[[120,130]]]
+    # #subformula_types = np.array([4,2,2]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
+    # agent_init_loc = np.array([0,0]) # Initial pos. (x,y) of the agent
+    # u_tar_max = .1*np.array([0.5, 0.5, 0.5])
+
+    # roi=np.array([[-30, 0, 10],[0,-30, 10],[-30, -30, 10]])
+
+    # point1 = (-30, -30)
+    # point2 = (-30, 30)
+
+    # target_movements = {0: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (-25, 30)}, 1: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (0, -35)}, 2: {'type': 'periodic', 'point1': point1, 'point2': point2, 'heading_angle': np.arctan2(point2[1] - point1[1], point2[0] - point1[0])}, 3: {'type': "static"}} #movement patterns for each target region
+
+    # u_agent_max = 11 # Max vel. of the system
+    # disturbance_interval = [-1, 1]
+    # w_max = max(abs(disturbance_interval[0]), abs(disturbance_interval[1]))
+    # u_agent_max = u_agent_max - w_max #reduce the max agent speed by the disturbance bound (worst-case)
+
+    
+    # roi_disj = [] #np.copy(roi) # Create alternative RoI's (to be modified)  
+    # n_tar = len(roi) # of targets
+    # disj_map = np.array([np.arange(0,n_tar)]) 
+    # rois = [roi]
+
+
+    #scenario-5
+    t_windows=[[[0,60],[0,10]],[[150,180],[0,10]],[[0,300],[0,110]]] # STL time windows
+    subformula_types = np.array([3,3,4]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
+    #t_windows=[[[0,200],[0,90]],[[20,30]],[[120,130]]]
+    #subformula_types = np.array([4,2,2]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
+    agent_init_loc = np.array([0,0]) # Initial pos. (x,y) of the agent
+    u_tar_max = np.array([2, 2, 1])
+
+    roi=np.array([[25.87213672,  72.20511635,  10],[ 41.80271465,   0.79833593,  10.],[-50, 60, 10]])
+
+    point1 = (-60, -60)
+    point2 = (-60, 60)
+
+    target_movements = {0: {'type': 'random_walk', 'heading_angle': np.random.uniform(0, 2 * np.pi)}, 1: {'type': 'random_walk', 'heading_angle': np.random.uniform(0, 2 * np.pi)}, 2: {'type': 'periodic', 'point1': point1, 'point2': point2, 'heading_angle': np.arctan2(point2[1] - point1[1], point2[0] - point1[0])}, 3: {'type': "static"}} #movement patterns for each target region
+
     u_agent_max = 11 # Max vel. of the system
     disturbance_interval = [-1, 1]
-    w_max = max(abs(disturbance_interval[0]), abs(disturbance_interval[1]))
-    u_agent_max = u_agent_max - w_max #reduce the max agent speed by the disturbance bound (worst-case)
 
-    roi_disj = np.copy(roi) # Create alternative RoI's (to be modified)
-    n_tar = np.size(roi,0) # of targets
-    alt_inds=np.zeros(n_tar) # Tasks with an alternative will be nonzero only
-    alt_inds[0]=1
-    roi_disj[alt_inds>0]=np.array([[-30,30,10]]) # Alternative target to 1st task
-    alt_movements = {0: {'type': 'circular', 'omega': 0.1, 'center_of_rotation': (-25, 30)}}
-    #disj_map = np.array([np.arange(0,n_tar),np.array([0,0,0,5,0])])
-    rois = [roi,roi_disj] # Create alternative full-RoI lists
+    roi_disj = [] #np.copy(roi) # Create alternative RoI's (to be modified)  
+    n_tar = len(roi) # of targets
+    disj_map = np.array([np.arange(0,n_tar)]) 
+    rois = [roi]
+
+
 
     target_colors = ['blue', 'red', 'green', 'black', 'yellow']
 
@@ -271,10 +330,10 @@ if __name__ == "__main__":
    
     task_types = ["F", "G", "FG", "GF"]
     #create the target dictionary:
-    cbf_targets = {}
+    targets = {}
     for i, target_id in enumerate(sequence):
         target_center = best_roi[target_id]
-        cbf_targets[i] = {
+        targets[i] = {
             'id': target_id,
             'type': task_types[subformula_types[target_id]-1],
             'time window': t_windows[target_id],
@@ -282,56 +341,20 @@ if __name__ == "__main__":
             'radius': best_roi[target_id][2],
             'u_max': u_tar_max[target_id],
             'remaining_time': rem_time_realistic[i],
-            'movement': target_movements[target_id] if np.any(np.all(roi == target_center, axis=1)) else alt_movements[target_id],
+            'movement': target_movements[target_id],
             'color': target_colors[target_id]
         }
 
     point1 = (-20, 10)
     point2 = (20, 10)
 
-    #FIND THE TARGETS FOR THE SIMULATION (ALL TARGETS, NOT JUST THE SCHEDULED ONES):
-
-    if rois == [roi]: #no alternatives
-        simulation_targets = copy.deepcopy(cbf_targets) #if there are no alternatives, just copy the CBF targets
-    else:
-        #create the target dictionary for the simulation (all targets, not just the scheduled ones):
-        alternative_key = next(iter(alt_movements))
-        simulation_targets = copy.deepcopy(cbf_targets) #start with the scheduled targets
-
-        temp_dict = {'id': alternative_key,
-                    'type': task_stypes[subformula_types[alternative_key]-1],
-                    'time window': t_windows[alternative_key],
-                    'center': roi_disj[alternative_key][:2],
-                    'radius': roi_disj[alternative_key][2],
-                    'u_max': u_tar_max[alternative_key],
-                    'remaining_time': rem_time_realistic[i],
-                    'movement': alt_movements[alternative_key],
-                    'color': target_colors[alternative_key]
-                }
-        
-        simulation_targets = {}
-        for i, target_id in enumerate(sequence):
-            target_center = roi[target_id]
-            simulation_targets[i] = {
-                'id': target_id if target_id < alternative_key else target_id + 1, #shift the ids of the original targets if there is an alternative with id 0
-                'type': task_stypes[subformula_types[target_id]-1],
-                'time window': t_windows[target_id],
-                'center': roi[target_id][:2],
-                'radius': roi[target_id][2],
-                'u_max': u_tar_max[target_id],
-                'remaining_time': rem_time_realistic[i],
-                'movement': target_movements[target_id] if np.any(np.all(roi == target_center, axis=1)) else alt_movements[target_id],
-                'color': target_colors[target_id]
-            }
-
-        simulation_targets[len(simulation_targets)] = temp_dict #add the alternative target region to the simulation targets
-
-
+    initial_remaining_times = {i: targets[i]['remaining_time'] for i in targets}  #dictionary to store the initial remaining times for each target region
 
     goals = {
 	0: {'center': (100, 100), 'radius': 0, 'movement':{'type':'static'}}, #goal region for the agent
 	}
 
+    print("Targets:", targets)
 
     #config dictionary for the environment
     config = {
@@ -344,7 +367,7 @@ if __name__ == "__main__":
         "goals": goals,  # goal regions for the agent
         "obstacle_location": [100.0, 100.0],
         "obstacle_size": 0.0,
-        "targets": simulation_targets,  # dictionary of targets for the CBF
+        "targets": targets,  # dictionary of targets for the CBF
         "dynamics": "single integrator", #dynamics model to use
         'u_agent_max': u_agent_max, #max agent speed
         "randomize_loc": False,  #whether to randomize the agent location at the end of each episode
@@ -361,18 +384,20 @@ if __name__ == "__main__":
 
     action = action_rl
 
-    episode_length = 300
+    episode_length = 400
 
     distances = []
 
     t = 0
 
-    while t <= episode_length and len(cbf_targets) > 0:
+    while t <= episode_length and len(targets) > 0:
+        #print("Current targets:", targets)
+        #print("target keys:", targets.keys())
         #print("Current targets:", targets, "\n")
         #calculate the CBF values for each target region and take the minimum:
         cbf_values = {}
-        for target_index in cbf_targets.keys():
-            cbf_value = sequential_CBF(state, u_agent_max, cbf_targets, target_index)
+        for target_index in targets.keys():
+            cbf_value = sequential_CBF(state, u_agent_max, targets, target_index)
             cbf_values[target_index] = cbf_value
 
         #print(cbf_values)
@@ -381,7 +406,7 @@ if __name__ == "__main__":
         #print("Minimum CBF value target index:", min_key)
 
         #Now solve the QP to get the control input for the target region with the minimum CBF value:
-        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, t, cbf_targets, action_rl)
+        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, disturbance_interval, min_key, t, targets, action_rl)
 
         action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 
@@ -389,22 +414,22 @@ if __name__ == "__main__":
         #print('Time:',t)
         #print('Targets:', targets)
 
-        #decrease the remaining time and update the center for each target region
-        for target_index in list(cbf_targets.keys()):
-            first_key = next(iter(cbf_targets))
-            #print("Target index:", target_index, "Remaining time:", cbf_targets[target_index]['remaining_time'])
-            cbf_targets[target_index]['remaining_time'] -= 1
-            #cbf_targets[target_index]['center'] = moving_target(t, center_of_rotation, cbf_targets[target_index]['u_max'])
-            task_type = cbf_targets[target_index]['type']
-            time_window = cbf_targets[target_index]['time window']
+        for target_index in list(targets.keys()):
+            first_key = next(iter(targets))
+            targets[target_index]['remaining_time'] -= 1 #decrement the remaining time for all target regions
+            #print("Target index:", target_index, "Remaining time:", targets[target_index]['remaining_time'])
+            #targets[target_index]['center'] = moving_target(t, center_of_rotation, targets[target_index]['u_max'])
+            task_type = targets[target_index]['type']
+            time_window = targets[target_index]['time window']
 
             #calculate the signed distance to each target region:
-            target_center = cbf_targets[target_index]['center']
-            target_radius = cbf_targets[target_index]['radius']
+            target_center = targets[target_index]['center']
+            target_radius = targets[target_index]['radius']
             dist = np.linalg.norm(state[:2] - target_center)
             signed_distance = dist - target_radius
 
-            #print("Signed distance to target region", targets[target_index]['id'], ":", signed_distance)
+            if signed_distance < 0:
+                print("inside target region", targets[target_index]['id'], "at time", t)
 
             remove_target = False #flag to indicate whether to remove the visited target region
 
@@ -425,15 +450,24 @@ if __name__ == "__main__":
                 if t == a and signed_distance <= 0:
                     remove_target = True #remove the target region if the agent is inside it at the start of the time window
                     #Hold inside the target region until the end of the time window:
-                    cbf_targets[target_index]['remaining_time'] = 0 #set the remaining time to the length of the time window
+                    targets[target_index]['remaining_time'] = 0 #set the remaining time to the length of the time window
                     for j in range(b-a):
-                        print("Holding inside target region", cbf_targets[target_index]['id'], "at time", t)
+                        print("Holding inside target region", targets[target_index]['id'], "at time", t)
                         t += 1
-                        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, t, cbf_targets, action_rl)
+
+                        for key in targets.keys():
+                            if key != target_index: #do not decrement the remaining time for the current target region
+                                targets[key]['remaining_time'] -= 1
+
+                        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, t, targets, action_rl)
 
                         action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 
-                        state, reward, done = env.step(action)            
+                        state, reward, done = env.step(action)
+                        print('Targets:', targets)
+
+
+
                 else:
                     continue
             elif task_type == "FG":
@@ -442,18 +476,25 @@ if __name__ == "__main__":
                 b = time_window[0][1]
                 c = time_window[1][0]
                 d = time_window[1][1]
-                if t <= (a+c) and t >= (b+c) and signed_distance <= 0:
+                if t >= (a+c) and t <= (b+c) and signed_distance <= 0:
                     #within the time window
                     remove_target = True
-                    cbf_targets[target_index]['remaining_time'] = 0 #set the remaining time to the length of the time window
+                    targets[target_index]['remaining_time'] = 0 #set the remaining time to the length of the time window
                     for j in range(d-c):
-                        print("Holding inside target region", cbf_targets[target_index]['id'], "at time", t)
+                        #print("Holding inside target region", targets[target_index]['id'], "at time", t)
                         t += 1
-                        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, t, cbf_targets, action_rl)
+
+                        for key in targets.keys():
+                            if key != target_index: #do not decrement the remaining time for the current target region
+                                targets[key]['remaining_time'] -= 1
+
+                        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, t, targets, action_rl)
 
                         action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 
-                        state, reward, done = env.step(action)    
+                        state, reward, done = env.step(action)
+
+
                 else: continue
 
             elif task_type == "GF":
@@ -468,31 +509,37 @@ if __name__ == "__main__":
                     ##################################################################################
                     #UPDATE the remaining time for the next target region with the same id (if any):
                     ##################################################################################
-                    keys = list(cbf_targets.keys())
-                    this_id = cbf_targets[target_index]['id']
+                    keys = list(targets.keys())
+                    this_id = targets[target_index]['id']
                     next_key = None
                     i = keys.index(target_index)
                     for kk in keys[i+1:]:              # look ahead
-                        if cbf_targets[kk]['id'] == this_id:
+                        if targets[kk]['id'] == this_id:
                             next_key = kk              # found the next duplicate
                             break
                     if next_key is not None:
-                        cbf_targets[next_key]['remaining_time'] = d - c #set the next iteration's remaining time to the second time window's length
-                        print("Updated remaining time for target", cbf_targets[next_key]['id'], "to", cbf_targets[next_key]['remaining_time'])
+                        targets[next_key]['remaining_time'] = d - c #set the next iteration's remaining time to the second time window's length
+                        print("Updated remaining time for target", targets[next_key]['id'], "to", targets[next_key]['remaining_time'])
+                        print(targets)
                 else: continue
             
             #remove the target if the conditions are satisfied:
             if remove_target:
-                print("Agent is inside target region:", cbf_targets[target_index]['id'])
-                cbf_targets.pop(target_index)  # Remove target region if the agent is inside it
-
+                #print("Agent is inside target region:", targets[target_index]['id'])
+                targets.pop(target_index)  # Remove target region if the agent is inside it
 
         t += 1 #increment time step
+
+        # #update the remaining time for all target regions:
+        # for target_index in targets.keys():
+        #     init_rem_t = initial_remaining_times[target_index]
+        #     targets[target_index]['remaining_time'] = init_rem_t - t
+
 
         # if done:
         #     break
 
-    if cbf_targets == {}:
+    if targets == {}:
         print("Task completed!")
 
     # plt.close()

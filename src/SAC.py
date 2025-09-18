@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 from Sequential_CBF_new import *
 from CLF import solve_clf_qp, clf_function
 import copy
+from task_schedule_py3 import task_scheduler
 
 
 
@@ -125,6 +126,7 @@ class SAC:
         self.CBF_params = hyperparameters.get("CBF_params", None) #CBF parameters, if any
         
         self.disturbance = hyperparameters.get("disturbance") #disturbance range in both x and y directions [w_min, w_max]
+        self.folder_name = hyperparameters.get("folder_name", None) #folder name to save the model and plots in
 
         if self.disturbance is not None:
             self.w_max = max(abs(self.disturbance[0]), abs(self.disturbance[1]))
@@ -199,37 +201,57 @@ class SAC:
         frame_idx = 0 #num of frames so far
         infeasible_solutions = 0 #number of infeasible solutions found during training
 
-        initial_targets = [(key, copy.deepcopy(value)) for key, value in self.CBF_params['targets'].items()]
-        u_agent_max = self.CBF_params['u_agent_max']
+        u_agent_max_cbf = self.CBF_params['u_agent_max'] #max agent speed for sequence generation
 
         #NEW:
         if self.disturbance is not None:
-            u_agent_max = u_agent_max - self.w_max #reduce the max agent speed by the disturbance bound (worst-case)
+            u_agent_max_cbf = u_agent_max_cbf - self.w_max #reduce the max agent speed by the disturbance bound (worst-case)
+
+        u_agent_max = self.CBF_params['u_agent_max'] - 4 #actual max speed
 
         global_t = 0
 
-        targets = self.CBF_params['targets']
-        
+        STL_dict = self.CBF_params['STL']
+
+        simulation_targets = self.CBF_params['sim_targets']
+        task_violation = 0 #number of episodes where the STL task is violated
+
+        task_type = {'F':1, 'G':2, 'FG':3, 'GF':4}
 
         for eps in range(self.num_episodes):
-            #reset the targets (episodic STL tasks)
-            for target in initial_targets:
-                targets[target[0]] = copy.deepcopy(target[1]) #use a deep copy to reset the target dictionaries
-            
+            if self.CBF:
+                #FIRST GENERATE THE TASK SEQUENCE:
+                t_windows=STL_dict['t_windows'] # STL time windows
+                subformula_types = STL_dict['subformula_types'] # 1: F, 2: G, 3: FG, 4: GF | Formula Types
+                u_tar_max = STL_dict['u_tar_max'] # Max velocities of the targets
+                target_movements = STL_dict['target_movements'] #movement patterns for each target region
+                roi = np.zeros((len(subformula_types),3))
+                for target in simulation_targets.keys():
+                    roi[target] = np.array([simulation_targets[target]['center'][0], simulation_targets[target]['center'][1], simulation_targets[target]['radius']])
+                rois = [roi]
+                # print('targets:',simulation_targets,'\n')
 
-            if self.online and eps > 0: #if online learning, go to the next initial position using CLFs
-                radius = 5
-                x_target = np.random.uniform(-self.env.width, self.env.width)
-                y_target = np.random.uniform(-self.env.height, self.env.height)
-                target_center = np.array([x_target, y_target])
-                alpha = 1.5
-                print('Moving to initial location...')
-                while np.linalg.norm(target_center - state) - radius >= 0.0:
-                    action = solve_clf_qp(state, target_center, alpha, u_agent_max/2)
-                    next_state, reward, done = self.env.step(action)
-                    state = next_state
+                # print('rois:',rois, 'time windows:', t_windows, 'subformula types:', subformula_types, 'u_tar_max:', u_tar_max, '\n')
+                sequence = None
+                while sequence is None: #keep generating sequences until a feasible one is found
+                    #sample a random initial location for the agent:
+                    state = self.env.reset()
+                    sequence, rem_time, rem_time_realistic, roi_best, amma, portions, portions0 = task_scheduler(rois,t_windows,subformula_types,state,u_agent_max_cbf,u_tar_max)
 
-                print('Learning continues...')
+                task_stypes = ["F", "G", "FG", "GF"]
+                #create the target dictionary:
+                targets = {}
+                for i, target_id in enumerate(sequence):
+                    targets[i] = {
+                        'id': target_id,
+                        'type': task_stypes[subformula_types[target_id]-1],
+                        'time window': t_windows[target_id],
+                        'center': roi[target_id][:2],
+                        'radius': roi[target_id][2],
+                        'u_max': u_tar_max[target_id],
+                        'remaining_time': rem_time_realistic[i],
+                        'movement': target_movements[target_id]
+                    }
 
             else:
                 state =  self.env.reset()
@@ -239,6 +261,13 @@ class SAC:
             step = 0 #reset step counter for each episode
              
             while step <= self.max_timesteps_per_episode:
+                #update target centers:
+                for key in simulation_targets.keys():
+                    id = simulation_targets[key]['id']
+                    for target_index in targets.keys():
+                        if targets[target_index]['id'] == id:
+                            targets[target_index]['center'] = simulation_targets[key]['center']
+
                 if frame_idx < explore_steps:
                     action_RL = self.policy_net.sample_action()
                     print('Exploration action:', action_RL)
@@ -249,13 +278,13 @@ class SAC:
                         #First, calculate the CBF value for each target region:
                         cbf_values = {}
                         for target_index in targets.keys():
-                            cbf_value = sequential_CBF(state, u_agent_max, targets, target_index)
+                            cbf_value = sequential_CBF(state, u_agent_max_cbf, targets, target_index)
                             cbf_values[target_index] = cbf_value
 
                         min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
 
                         #Now solve the QP to get the control input for the target region with the minimum CBF value:
-                        action_CBF = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, step, targets, action_RL)
+                        action_CBF = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
 
                         if action_CBF is None:
                             # If the QP fails, we can either ignore the CBF action or set it to zero
@@ -275,7 +304,7 @@ class SAC:
                 state = next_state
                 episode_reward += reward
                 
-                if self.CBF:
+                if self.CBF and len(targets) != 0: #If CBF is activated and there are still target regions remaining:
                     #decrease the remaining time and update the center for each target region
                     for target_index in list(targets.keys()):
                         first_key = next(iter(targets))
@@ -312,13 +341,18 @@ class SAC:
                                 #Hold inside the target region until the end of the time window:
                                 targets[target_index]['remaining_time'] = 0 #set the remaining time to the length of the time window
                                 for j in range(b-a):
-                                    print("Holding inside target region", targets[target_index]['id'], "at time", step)
+                                    #print("Holding inside target region", targets[target_index]['id'], "at time", step)
                                     step += 1
-                                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, step, targets, action_rl)
 
-                                    action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
+                                    for key in targets.keys():
+                                        if key != target_index: #do not decrement the remaining time for the current target region
+                                            targets[key]['remaining_time'] -= 1
 
-                                    next_state, reward, done = env.step(action) 
+                                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
+
+                                    action = (u_cbf[0] + action_RL[0], u_cbf[1] + action_RL[1])  # Combine CBF and RL actions
+
+                                    next_state, reward, done = self.env.step(action) 
 
                                     self.replay_buffer.push(state, action, reward, next_state, done)
 
@@ -332,18 +366,23 @@ class SAC:
                             b = time_window[0][1]
                             c = time_window[1][0]
                             d = time_window[1][1]
-                            if step <= (a+c) and step >= (b+c) and signed_distance <= 0:
+                            if step >= (a+c) and step <= (b+c) and signed_distance <= 0:
                                 #within the time window
                                 remove_target = True
                                 targets[target_index]['remaining_time'] = 0 #set the remaining time to the length of the time window
                                 for j in range(d-c):
-                                    print("Holding inside target region", targets[target_index]['id'], "at time", step)
+                                    #print("Holding inside target region", targets[target_index]['id'], "at time", step)
                                     step += 1
-                                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, step, targets, action_rl)
 
-                                    action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
+                                    for key in targets.keys():
+                                        if key != target_index: #do not decrement the remaining time for the current target region
+                                            targets[key]['remaining_time'] -= 1
 
-                                    next_state, reward, done = env.step(action)
+                                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
+
+                                    action = (u_cbf[0] + action_RL[0], u_cbf[1] + action_RL[1])  # Combine CBF and RL actions
+
+                                    next_state, reward, done = self.env.step(action)
 
                                     self.replay_buffer.push(state, action, reward, next_state, done)
 
@@ -381,10 +420,13 @@ class SAC:
                             #print("Agent is inside target region:", targets[target_index]['id'])
                             targets.pop(target_index)  # Remove target region if the agent is inside it
 
-
                 frame_idx += 1
                 step += 1 #increment step counter
                 global_t += 1 #increment global time step
+
+                # for target_index in targets.keys():
+                #     init_rem_t = initial_remaining_times[target_index]
+                #     targets[target_index]['remaining_time'] = init_rem_t - step
 
                 if len(self.replay_buffer) > self.batch_size:
                     for i in range(self.n_updates_per_iteration):
@@ -392,9 +434,13 @@ class SAC:
 
                 # if done: #terminate the episode if target region is reached
                 #     break
-            
+
+            if len(targets) != 0: #if the sequence is non-empty after the episode, count it as a task violation
+                task_violation += 1
+
+
             if eps % 20 == 0 and eps>0: # plot and model saving interval
-                    self.save_model()
+                    self.save_model(self.folder_name)
 
 
             print('Episode: ', eps, '| Episode Reward: ', episode_reward)
@@ -402,7 +448,7 @@ class SAC:
             #self._log_summary()
 
         #save the final model:
-        self.save_model()
+        self.save_model(self.folder_name)
 
         # plot the results and save the graph:
         plt.close()
@@ -412,26 +458,21 @@ class SAC:
        #plt.title(f'CBF: {self.CBF}, Violations: {self.safety_violations}, Iterations: {len(self.logger["avg_batch_rews"])}, Updates per Iterations: {self.n_updates_per_iteration}')
         plt.grid()
 
-        now = datetime.now()
-        formatted_time = now.strftime("%Y-%m-%d %H:%M:%S")
-        # if self.CBF:
-        #     formatted_time = 'CBF_' + formatted_time
-        # else:
-        #     formatted_time = 'noCBF_' + formatted_time
+        base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'plots')
+        plot_dir = os.path.join(base_dir, self.folder_name)
+        os.makedirs(plot_dir, exist_ok=True)
 
-        plot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'plots')
-        plot_path = os.path.join(plot_dir, f'{formatted_time}.png')
-        plt.savefig(plot_path) #save the plot with the current date and time
+        plot_path = os.path.join(plot_dir, 'plot.png')
+        plt.savefig(plot_path, dpi = 200) #save the plot with the current date and time
         print('Plot saved!')
 
-        plt.show()
+        #plt.show()
 
-        plt.plot(self.logger['eps_rewards'])
+        return self.logger['eps_rewards'], task_violation
 
 
-
-    def save_model(self):
-        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models')
+    def save_model(self, folder_name):
+        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models', folder_name)
         os.makedirs(model_dir, exist_ok=True)
 
         torch.save(self.soft_q_net1.state_dict(), os.path.join(model_dir, 'Q1.pth'))

@@ -30,7 +30,7 @@ def task_scheduler(rois,t_windows,subformula_types,x0,umax,v_tar_max):
     for alt in range(n_alt): # Alternatives
         roi_temp = rois[alt]
         chain,portions,rem_time,min_portions = sequence_constructer(t_windows,subformula_types,x0,roi_temp,umax,v_tar_max)
-        print("Alternative {}: chain {}, portions {}, rem_time {}, min_portions {}".format(alt,chain,portions,rem_time,min_portions))
+        #print("Alternative {}: chain {}, portions {}, rem_time {}, min_portions {}".format(alt,chain,portions,rem_time,min_portions))
         # if len(chain) == 0: #changed!!!!!!
         #     # print("Alternative {} is infeasible.".format(alt))
         #     continue
@@ -38,9 +38,11 @@ def task_scheduler(rois,t_windows,subformula_types,x0,umax,v_tar_max):
         feasible_portions.append(portions)
         feasible_rem_time.append(rem_time)
         minimum_portions.append(min_portions)
-    print("Selected orders among the alternatives: {}".format(feasible_chains))
+    #print("Selected orders among the alternatives: {}".format(feasible_chains))
     if all(len(x) == 0 for x in feasible_chains):
-        raise Exception("No feasible sequence found!")
+        #raise Exception("No feasible sequence found!")
+        #print("No feasible sequence found!")
+        return None, None, None, None, None, None, None
     elif not minimum_portions:
         print("Feasible chains: {}".format(feasible_chains))
         print("Feasible portions: {}".format(feasible_portions))
@@ -76,7 +78,7 @@ def sequence_constructer(t_windows,types,x0,roi,umax,v_maxs):
     for i in range(n_tar):
         hrz_cand[i] = sum(item[1] for item in t_windows[i])# Check the horizons of each subformula
     hrz=max(hrz_cand) # Pick the maximum horizon as the mission hrz
-    print("Mission horizon: {}".format(hrz))
+    #print("Mission horizon: {}".format(hrz))
     
     u = SX.sym('u',2) # Control input
     xc = SX.sym('xc',3) # Circle x,y,rad
@@ -104,7 +106,7 @@ def sequence_constructer(t_windows,types,x0,roi,umax,v_maxs):
     laxity_vals = []
     periodic_tasks = np.where(types == 4)[0] # starts from 0 (if any!)
     order_set = interval_clustering(t_windows,periodic_tasks)
-    # print("Orders to be checked: {}".format(order_set))  
+    #print("Orders to be checked: {}".format(order_set))  
     for order in order_set: # Run over all possible orders
         r_temp=np.copy(r)
         spent_time=0
@@ -266,10 +268,10 @@ def sequence_constructer(t_windows,types,x0,roi,umax,v_maxs):
     # except: # No feasible orders
     #     return [],[],[],[]
 
-    print("Feasible orders: {}".format(feasible_orders))
+    #print("Feasible orders: {}".format(feasible_orders))
     # set of distinct lengths
     unique_lengths = {len(a) for a in feasible_orders}
-    print("Length options for feasible orders: {}".format(sorted(unique_lengths)))          # e.g., [24, 26, 28]
+    #print("Length options for feasible orders: {}".format(sorted(unique_lengths)))          # e.g., [24, 26, 28]
 
     try:
         groups = {}  # key: tuple(chain) -> list of portions arrays for that chain
