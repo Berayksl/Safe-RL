@@ -286,7 +286,7 @@ if __name__ == "__main__":
         "height": 100.0,
         "dt": 1,
         "render": False,
-		'dt_render': 0.03,
+		'dt_render': 0.01,
 		'goals': goals, #goal regions for the agent
         "obstacle_location": [100.0, 100.0],
         "obstacle_size": 0.0,
@@ -316,7 +316,7 @@ if __name__ == "__main__":
 				'buffer_size': int(1e6),
 				'batch_size': 256,
 				'max_timesteps_per_episode': 300, 
-				'num_episodes': 100,
+				'num_episodes': 20,
 				'n_updates_per_iteration': 1,
 				'deterministic': False,
 				'auto_entropy':True,
@@ -335,7 +335,7 @@ if __name__ == "__main__":
 
 	# Train or test, depending on the mode specified
 	if args.mode == 'train':
-		num_runs = 10 #number of independent runs to average over
+		num_runs = 1 #number of independent runs to average over
 		train(env=env, hyperparameters=hyperparameters, num_runs=num_runs, actor_model='', critic_model='')
 
 	elif args.mode == 'test':

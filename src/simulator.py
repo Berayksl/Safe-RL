@@ -16,6 +16,7 @@ class Continuous2DEnv:
         self.height = config.get("height", 10.0)
         self.dt = config.get("dt", 0.1)
         self.render = config.get("render", False)
+        self.show_timer = config.get("show_timer", True)
         self.dt_render = config.get("dt_render", 0.001)
         self.goals = config.get("goals", None)  # dictionary of goals for the agent
         self.obstacle_location = np.array(config.get("obstacle_location", [4.0, 4.0]))
@@ -60,10 +61,9 @@ class Continuous2DEnv:
                 mng.window.wm_geometry("900x650+120+80")  # WxH+X+Y
             except Exception:
                 try:
-                    print('here')
                     # Qt backend
                     # setGeometry(x, y, width, height)
-                    mng.window.setGeometry(120, 80, 1500, 1500)
+                    mng.window.setGeometry(1200, 80, 1500, 1500)
                 except Exception:
                     pass  # other backends may not support moving the window
 
@@ -77,6 +77,15 @@ class Continuous2DEnv:
                 goal_plot = plt.Circle(goal['center'], goal['radius'], color='g', alpha=0.5, label='Goal')
                 self.goal_plots.append(goal_plot)
                 self.ax.add_patch(goal_plot)
+
+            if self.show_timer:
+                self.timer_text = self.ax.text(
+                    0.02, 0.98, f"Time:{self.simulation_timer%301}",
+                    transform=self.ax.transAxes,
+                    ha='left', va='top', fontsize=25,
+                    bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='black', alpha=0.75),
+                    zorder=10
+                )
 
             self.obstacle_plot = plt.Circle(self.obstacle_location, self.obstacle_size, color='r', alpha=0.5, label='Obstacle')
             #self.target_region_plot = plt.Circle(self.target_region_center, self.target_region_radius, color='b', fill=False, linestyle='-', label='Target Region')
@@ -288,6 +297,9 @@ class Continuous2DEnv:
         time.sleep(self.dt_render)
         # Update agent position
         self.agent_plot.set_data([self.agent.x], [self.agent.y])
+
+        if self.render and self.show_timer:
+            self.timer_text.set_text(f"Time:{self.simulation_timer%301}")
         
         # Update targets' positions
         for patch in self.target_region_patches:

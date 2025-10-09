@@ -193,10 +193,10 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, disturbance_interval, target_
     #prob.solve(solver=cp.OSQP, verbose = True)
 
     if prob.status == cp.OPTIMAL or prob.status == cp.OPTIMAL_INACCURATE:
-        return u.value
+        return u.value, delta.value
     else:
         print("QP failed:", prob.status)
-        return None
+        return None, None
 
 
 if __name__ == "__main__":
@@ -297,36 +297,35 @@ if __name__ == "__main__":
 
 
     #scenario-5
-    t_windows=[[[0,60],[0,10]],[[150,180],[0,10]],[[0,300],[0,110]]] # STL time windows
+    t_windows=[[[0,60],[0,10]],[[150,180],[0,10]],[[0,190],[0,100]]] # STL time windows
     subformula_types = np.array([3,3,4]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
     #t_windows=[[[0,200],[0,90]],[[20,30]],[[120,130]]]
     #subformula_types = np.array([4,2,2]) # 1: F, 2: G, 3: FG, 4: GF | Formula Types
-    agent_init_loc = np.array([0,0]) # Initial pos. (x,y) of the agent
-    u_tar_max = np.array([2, 2, 1])
+    agent_init_loc = np.array([-50,-30]) # Initial pos. (x,y) of the agent
+    u_tar_max = np.array([1, 1, 1])
 
-    roi=np.array([[25.87213672,  72.20511635,  10],[ 41.80271465,   0.79833593,  10.],[-50, 60, 10]])
+    roi = np.array([[-20, 65, 11],[-60,10, 11],[0, -60, 11]])
 
     point1 = (-60, -60)
     point2 = (-60, 60)
 
-    target_movements = {0: {'type': 'random_walk', 'heading_angle': np.random.uniform(0, 2 * np.pi)}, 1: {'type': 'random_walk', 'heading_angle': np.random.uniform(0, 2 * np.pi)}, 2: {'type': 'periodic', 'point1': point1, 'point2': point2, 'heading_angle': np.arctan2(point2[1] - point1[1], point2[0] - point1[0])}, 3: {'type': "static"}} #movement patterns for each target region
+    #target_movements = {0: {'type': 'random_walk', 'heading_angle': np.random.uniform(0, 2 * np.pi)}, 1: {'type': 'random_walk', 'heading_angle': np.random.uniform(0, 2 * np.pi)}, 2: {'type': 'periodic', 'point1': point1, 'point2': point2, 'heading_angle': np.arctan2(point2[1] - point1[1], point2[0] - point1[0])}, 3: {'type': "static"}} #movement patterns for each target region
+    target_movements = {0: {'type': 'random_walk', 'heading_angle': np.random.uniform(0, 2 * np.pi)}, 1: {'type': 'random_walk', 'heading_angle': np.random.uniform(0, 2 * np.pi)}, 2: {'type': 'circular', 'center_of_rotation': (10, 0)}} #movement patterns for each target region
 
-    u_agent_max = 11 # Max vel. of the system
+
+    u_agent_max = 12 # Max vel. of the system
     disturbance_interval = [-1, 1]
 
     roi_disj = [] #np.copy(roi) # Create alternative RoI's (to be modified)  
     n_tar = len(roi) # of targets
     disj_map = np.array([np.arange(0,n_tar)]) 
     rois = [roi]
-
-
-
     target_colors = ['blue', 'red', 'green', 'black', 'yellow']
 
     sequence, rem_time, rem_time_realistic, best_roi, gamma, portions, portions0 = task_scheduler(rois,t_windows,subformula_types,agent_init_loc,u_agent_max,u_tar_max)
 
     print(sequence, rem_time, rem_time_realistic, gamma, best_roi)
-    
+    target_labels = ['Target1', 'Target2', 'Charger']
    
     task_types = ["F", "G", "FG", "GF"]
     #create the target dictionary:
@@ -342,16 +341,27 @@ if __name__ == "__main__":
             'u_max': u_tar_max[target_id],
             'remaining_time': rem_time_realistic[i],
             'movement': target_movements[target_id],
-            'color': target_colors[target_id]
+            'color': target_colors[target_id],
+            'label': target_labels[target_id]
         }
 
-    point1 = (-20, 10)
-    point2 = (20, 10)
+    # target_colors = ['blue', 'red', 'green', 'black', 'yellow']
+    # simulation_targets = {}
+    # for key, value in target_movements.items():
+    #     simulation_targets[key] = {
+    #         'id': key,
+    #         'center': roi[key][:2],
+    #         'radius': roi[key][2],
+    #         'u_max': u_tar_max[key],
+    #         'movement': value,
+    #         'color': target_colors[key],
+    #         'label': target_labels[key]
+    #     }
 
     initial_remaining_times = {i: targets[i]['remaining_time'] for i in targets}  #dictionary to store the initial remaining times for each target region
 
     goals = {
-	0: {'center': (100, 100), 'radius': 0, 'movement':{'type':'static'}}, #goal region for the agent
+	0: {'center': (50, 0), 'radius': 11, 'movement':{'type':'static'}}, #goal region for the agent
 	}
 
     print("Targets:", targets)
@@ -400,13 +410,14 @@ if __name__ == "__main__":
             cbf_value = sequential_CBF(state, u_agent_max, targets, target_index)
             cbf_values[target_index] = cbf_value
 
-        #print(cbf_values)
+        print(cbf_values)
 
         min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
         #print("Minimum CBF value target index:", min_key)
 
         #Now solve the QP to get the control input for the target region with the minimum CBF value:
-        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, disturbance_interval, min_key, t, targets, action_rl)
+        u_cbf, slack_variable = solve_cbf_qp(sequential_CBF, state, u_agent_max, disturbance_interval, min_key, t, targets, action_rl)
+        #print("Slack variable:", slack_variable)
 
         action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 
@@ -459,15 +470,12 @@ if __name__ == "__main__":
                             if key != target_index: #do not decrement the remaining time for the current target region
                                 targets[key]['remaining_time'] -= 1
 
-                        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, t, targets, action_rl)
+                        u_cbf, slack_variable = solve_cbf_qp(sequential_CBF, state, u_agent_max, disturbance_interval, min_key, t, targets, action_rl)
 
                         action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 
                         state, reward, done = env.step(action)
                         print('Targets:', targets)
-
-
-
                 else:
                     continue
             elif task_type == "FG":
@@ -488,7 +496,7 @@ if __name__ == "__main__":
                             if key != target_index: #do not decrement the remaining time for the current target region
                                 targets[key]['remaining_time'] -= 1
 
-                        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, min_key, t, targets, action_rl)
+                        u_cbf, slack_variable = solve_cbf_qp(sequential_CBF, state, u_agent_max, disturbance_interval, min_key, t, targets, action_rl)
 
                         action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 

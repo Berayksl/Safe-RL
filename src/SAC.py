@@ -202,6 +202,7 @@ class SAC:
         infeasible_solutions = 0 #number of infeasible solutions found during training
 
         u_agent_max_cbf = self.CBF_params['u_agent_max'] #max agent speed for sequence generation
+    
 
         #NEW:
         if self.disturbance is not None:
@@ -215,10 +216,17 @@ class SAC:
 
         simulation_targets = self.CBF_params['sim_targets']
         task_violation = 0 #number of episodes where the STL task is violated
+        
 
         task_type = {'F':1, 'G':2, 'FG':3, 'GF':4}
 
+        slack_variables = [] #list to store the slack variables for each episode
+        remaining_times = [] #list to store the remaining times for each episode
+        eps_cbf_values = [] #list to store the minimum CBF values for each episode
+
         for eps in range(self.num_episodes):
+            
+            violation = False #flag to indicate whether a task violation has occurred in the current episode
             if self.CBF:
                 #FIRST GENERATE THE TASK SEQUENCE:
                 t_windows=STL_dict['t_windows'] # STL time windows
@@ -252,6 +260,9 @@ class SAC:
                         'remaining_time': rem_time_realistic[i],
                         'movement': target_movements[target_id]
                     }
+                max_slack_variables = {i: 0 for i in range(len(targets))} #dictionary to store the maximum slack variable for each target region
+                min_remaining_times = {i: float('inf') for i in range(len(targets))} #dictionary to store the minimum remaining time for each target region visit
+                min_cbf_values = {i: float('inf') for i in range(len(targets))} #dictionary to store the minimum CBF value for each target region
 
             else:
                 state =  self.env.reset()
@@ -277,14 +288,24 @@ class SAC:
                     if self.CBF and len(targets) != 0: #If CBF is activated and there are still target regions remaining:
                         #First, calculate the CBF value for each target region:
                         cbf_values = {}
+                        #print(targets)
                         for target_index in targets.keys():
                             cbf_value = sequential_CBF(state, u_agent_max_cbf, targets, target_index)
                             cbf_values[target_index] = cbf_value
 
+                        #print(cbf_values)
+
                         min_key = min(cbf_values, key=cbf_values.get)  #find the target region with the minimum CBF value
 
                         #Now solve the QP to get the control input for the target region with the minimum CBF value:
-                        action_CBF = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
+                        action_CBF, slack_variable = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
+
+                        if slack_variable is not None:
+                            if slack_variable > max_slack_variables[min_key]:
+                                max_slack_variables[min_key] = slack_variable #update the maximum slack variable for the selected target region
+                            if min_cbf_values[min_key] > cbf_values[min_key]:
+                                min_cbf_values[min_key] = cbf_values[min_key] #update the minimum CBF value for the selected target region
+
 
                         if action_CBF is None:
                             # If the QP fails, we can either ignore the CBF action or set it to zero
@@ -304,6 +325,15 @@ class SAC:
                 state = next_state
                 episode_reward += reward
                 
+                #check for violation:
+                for key in targets.keys():
+                    if targets[key]['remaining_time'] < 0:
+                        #print(f"Task {targets[i][first_key]['id']} failed at time {t}: remaining time exceeded")
+                        violation = True
+                    #update minimum remaining time for each target region:
+                    if targets[key]['remaining_time'] < min_remaining_times[key]:
+                        min_remaining_times[key] = targets[key]['remaining_time']
+
                 if self.CBF and len(targets) != 0: #If CBF is activated and there are still target regions remaining:
                     #decrease the remaining time and update the center for each target region
                     for target_index in list(targets.keys()):
@@ -348,7 +378,7 @@ class SAC:
                                         if key != target_index: #do not decrement the remaining time for the current target region
                                             targets[key]['remaining_time'] -= 1
 
-                                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
+                                    u_cbf, slack_variable = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
 
                                     action = (u_cbf[0] + action_RL[0], u_cbf[1] + action_RL[1])  # Combine CBF and RL actions
 
@@ -378,7 +408,7 @@ class SAC:
                                         if key != target_index: #do not decrement the remaining time for the current target region
                                             targets[key]['remaining_time'] -= 1
 
-                                    u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
+                                    u_cbf, slack_variable = solve_cbf_qp(sequential_CBF, state, u_agent_max, self.disturbance, min_key, step, targets, action_RL)
 
                                     action = (u_cbf[0] + action_RL[0], u_cbf[1] + action_RL[1])  # Combine CBF and RL actions
 
@@ -397,6 +427,7 @@ class SAC:
                             c = time_window[1][0]
                             d = time_window[1][1]
                             if step >= a + c and step <= b + d and signed_distance <= 0 and first_key == target_index: #only remove the target region if it is the first in the sequence
+                                #print("Agent is inside target region", targets[target_index]['id'], "at time", step)
                                 #within the time window
                                 remove_target = True
                                 ##################################################################################
@@ -435,13 +466,17 @@ class SAC:
                 # if done: #terminate the episode if target region is reached
                 #     break
 
-            if len(targets) != 0: #if the sequence is non-empty after the episode, count it as a task violation
+            # if len(targets) != 0: #if the sequence is non-empty after the episode, count it as a task violation
+            #     task_violation += 1
+            if violation:
                 task_violation += 1
-
 
             if eps % 20 == 0 and eps>0: # plot and model saving interval
                     self.save_model(self.folder_name)
 
+            slack_variables.append(max_slack_variables)
+            remaining_times.append(min_remaining_times)
+            eps_cbf_values.append(min_cbf_values)
 
             print('Episode: ', eps, '| Episode Reward: ', episode_reward)
             self.logger['eps_rewards'].append(episode_reward)
@@ -449,6 +484,10 @@ class SAC:
 
         #save the final model:
         self.save_model(self.folder_name)
+
+        print("Maximum slack variables for each target region:", slack_variables)
+        print("Minimum remaining times for each target region:", remaining_times)
+        print("Minimum CBF values for each target region:", eps_cbf_values)
 
         # plot the results and save the graph:
         plt.close()

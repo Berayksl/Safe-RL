@@ -22,7 +22,7 @@ def select_plot_file():
 
 def plot_data(data_list):
     colors = ['b', 'green', 'orange']
-    labels = [r"SAC Under $\Phi_1$", r"SAC Under $\Phi_2$", "SAC"]
+    labels = [r"SAC with $\Phi_1$", r"SAC with $\Phi_2$", "SAC (baseline)"]
     fig, ax = plt.subplots()
     for i, data in enumerate(data_list):
         mean = data.mean(axis=0)

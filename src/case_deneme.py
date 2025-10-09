@@ -190,7 +190,7 @@ def solve_cbf_qp(b_func, agent_state, u_agent_max, target_index, current_t, targ
     #prob.solve(solver=cp.OSQP, verbose = True)
 
     if prob.status == cp.OPTIMAL or prob.status == cp.OPTIMAL_INACCURATE:
-        return u.value
+        return u.value, delta.value
     else:
         print("QP failed:", prob.status)
         return None
@@ -234,13 +234,16 @@ if __name__ == "__main__":
     point2_1 = (-50 , -50)
     point2_2 = (-50, 50)
 
-    target_1 = {0: {'id': 1, 'type': 'GF', 'time_window': t_windows[0], 'center': roi[0,:2],'radius': roi[0,2], 'u_max': u_tar_max[0], 'remaining_time': 100, 'movement':{'type': 'periodic', 'point1': point1_1, 'point2': point1_2, 'heading_angle': np.arctan2(point2_1[1] - point1_1[1], point2_1[0] - point1_1[0])}, 'color': 'blue'}}
+    target_1 = {0: {'id': 1, 'type': 'GF', 'time_window': t_windows[0], 'label': 'target_1', 'center': roi[0,:2],'radius': roi[0,2], 'u_max': u_tar_max[0], 'remaining_time': 100, 'movement':{'type': 'periodic', 'point1': point1_1, 'point2': point1_2, 'heading_angle': np.arctan2(point2_1[1] - point1_1[1], point2_1[0] - point1_1[0])}, 'color': 'blue'}}
 
-    target_2 = {1: {'id': 2, 'type': 'GF', 'time_window': t_windows[0], 'center': roi_disj[0,:2],'radius': roi_disj[0,2], 'u_max': u_tar_max[0], 'remaining_time': 100, 'movement':{'type': 'periodic',  'point1': point2_1, 'point2': point2_2, 'heading_angle': np.arctan2(point2_2[1] - point2_1[1], point2_2[0] - point2_1[0])}, 'color': 'red'}}
+    #target_2 = {1: {'id': 2, 'type': 'GF', 'time_window': t_windows[0], 'center': roi_disj[0,:2],'radius': roi_disj[0,2], 'u_max': u_tar_max[0], 'remaining_time': 100, 'movement':{'type': 'periodic',  'point1': point2_1, 'point2': point2_2, 'heading_angle': np.arctan2(point2_2[1] - point2_1[1], point2_2[0] - point2_1[0])}, 'color': 'red'}}
 
-    cbf_targets = [target_1, target_2]
+    #cbf_targets = [target_1, target_2]
 
-    simulation_targets = target_1 | target_2
+    #simulation_targets = target_1 | target_2
+
+    cbf_targets = [target_1]
+    simulation_targets = target_1
 
     print("Simulation targets:", simulation_targets)
 
@@ -294,13 +297,15 @@ if __name__ == "__main__":
             cbf_values.append(cbf_value)
 
         max_key = np.argmax(cbf_values)  #find the target region with the maximum CBF value
+        
 
         selected_target = cbf_targets[max_key]
         #print("Selected target:", selected_target)
         first_key = next(iter(selected_target))
 
         #Now solve the QP to get the control input for the target region with the minimum CBF value:
-        u_cbf = solve_cbf_qp(sequential_CBF, state, u_agent_max, first_key, t, selected_target, action_rl)
+        u_cbf, slack_variable = solve_cbf_qp(sequential_CBF, state, u_agent_max, first_key, t, selected_target, action_rl)
+        print("CBF values:", cbf_values, "Slack variable:", slack_variable)
 
         action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 
@@ -334,8 +339,6 @@ if __name__ == "__main__":
             if t >= a and t <= b and signed_distance <= 0:
                 #within the time window
                 remove_target = True
-            else:
-                continue #do not remove the target region if the agent is outside the time window
 
         elif task_type == "G":
             # Handle G type tasks
@@ -353,8 +356,7 @@ if __name__ == "__main__":
                     action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 
                     state, reward, done = env.step(action)            
-            else:
-                continue
+
         elif task_type == "FG":
             # Handle FG type tasks
             a = time_window[0][0]
@@ -373,7 +375,6 @@ if __name__ == "__main__":
                     action = (u_cbf[0] + action_rl[0], u_cbf[1] + action_rl[1])  # Combine CBF and RL actions
 
                     state, reward, done = env.step(action)    
-            else: continue
 
         elif task_type == "GF":
             # Handle GF type tasks
@@ -383,7 +384,7 @@ if __name__ == "__main__":
             d = time_window[1][1]
             if t >= a + c and t <= b + d and signed_distance <= 0: #only remove the target region if it is the first in the sequence
                 #within the time window
-                print('here')
+                print("Agent is inside target region", selected_target[first_key]['id'], "at time", t)
                 remove_target = True
                 ##################################################################################
                 #UPDATE the remaining time for the next target region with the same id (if any):
@@ -391,9 +392,8 @@ if __name__ == "__main__":
                 for i in range(len(cbf_targets)):
                     first_key = next(iter(cbf_targets[i]))
                     cbf_targets[i][first_key]['remaining_time'] = d - c
-            else: continue
-        
 
+        
         t += 1 #increment time step
 
         # if done:
